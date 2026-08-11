@@ -1,4 +1,24 @@
 services:
+  database:
+    image: postgis/postgis:16-3.4
+    container_name: whyhouse-database
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-whyhouse}
+      POSTGRES_USER: ${POSTGRES_USER:-whyhouse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-whyhouse}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - whyhouse-postgres-data:/var/lib/postgresql/data
+      - ../WhyHouse_Back/docker/postgres/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-whyhouse} -d ${POSTGRES_DB:-whyhouse}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - whyhouse
+
   backend:
     build:
       context: ../WhyHouse_Back
@@ -12,10 +32,17 @@ services:
       APP_VERSION: ${APP_VERSION:-0.1.0}
       API_PREFIX: ${API_PREFIX:-/api/v1}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://whyhouse:whyhouse@database:5432/whyhouse}
+      NAVER_MAPS_GEOCODE_BASE_URL: ${NAVER_MAPS_GEOCODE_BASE_URL:-https://maps.apigw.ntruss.com/map-geocode/v2}
+      NAVER_MAPS_REVERSE_GEOCODE_BASE_URL: ${NAVER_MAPS_REVERSE_GEOCODE_BASE_URL:-https://maps.apigw.ntruss.com/map-reversegeocode/v2}
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:
       - ../WhyHouse_Back/app:/app/app:ro
+    depends_on:
+      database:
+        condition: service_healthy
     networks:
       - whyhouse
 
@@ -25,13 +52,19 @@ services:
     working_dir: /app
     command: >
       sh -c "npm install &&
-      ${FRONTEND_COMMAND:-npm run dev -- --host 0.0.0.0 --port 3000}"
+      ${FRONTEND_COMMAND:-npm run dev}"
     env_file:
       - path: .env
         required: false
     environment:
       VITE_APP_NAME: ${VITE_APP_NAME:-WhyHouse Front}
       VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+      VITE_NAVER_MAPS_CLIENT_ID: ${VITE_NAVER_MAPS_CLIENT_ID:-}
+      VITE_NAVER_MAPS_DEFAULT_STYLE_ID: ${VITE_NAVER_MAPS_DEFAULT_STYLE_ID:-}
+      VITE_NAVER_MAPS_TRANSIT_STYLE_ID: ${VITE_NAVER_MAPS_TRANSIT_STYLE_ID:-}
+      VITE_NAVER_MAPS_SOFT_STYLE_ID: ${VITE_NAVER_MAPS_SOFT_STYLE_ID:-}
+      VITE_NAVER_MAPS_NO_TRANSIT_STYLE_ID: ${VITE_NAVER_MAPS_NO_TRANSIT_STYLE_ID:-}
+      FRONTEND_PORT: ${FRONTEND_PORT:-3000}
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     volumes:
@@ -48,3 +81,4 @@ networks:
 
 volumes:
   frontend_node_modules:
+  whyhouse-postgres-data:
