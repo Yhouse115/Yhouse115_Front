@@ -1,0 +1,30 @@
+# dependencies
+node_modules/
+
+# build outputs
+dist/
+coverage/
+.vite/
+
+# local env and secrets
+.env
+.env.*
+!.env.example
+
+# logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# local/editor files
+.DS_Store
+.idea/
+.vscode/
+
+# local data
+tmp/
+data/
+local-data/
