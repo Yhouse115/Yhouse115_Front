@@ -15,9 +15,10 @@ The frontend must not own backend calculations, persistence models, database acc
 - Put API clients and integration boundaries in `src/services/`.
 - Put runtime config loading in `src/config/`.
 - Put shared CSS in `src/styles/`.
-- Put static assets in `src/assets/` only when real assets are introduced.
+- Put static assets and asset guidance in `src/assets/`.
 - Keep route and feature modules thin; service modules own API calls and response mapping.
 - Avoid creating empty future modules unless a current change needs them.
+- Keep frontend-owned local stack orchestration in `docker-compose.yml`; it may reference `../WhyHouse_Back`, but backend implementation remains owned by the backend repository.
 
 ## Data Ownership
 
@@ -45,6 +46,7 @@ The frontend must not own backend calculations, persistence models, database acc
 
 - Keep README focused on purpose, commands, and links.
 - Put architecture details in `docs/frontend-architecture.md`.
+- Put UI direction, screen responsibility, and design boundaries in `docs/design.md`.
 - Put development phase tracking and workflow in `docs/development-workflow.md`.
 - Put setup/runtime issues in `docs/troubleshooting.md` only when they describe real current setup behavior.
 - Create ADRs under `docs/adr/NNNN-title.md` only when a durable decision has alternatives and consequences.

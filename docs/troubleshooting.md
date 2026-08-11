@@ -17,6 +17,12 @@ cd ../WhyHouse_Back
 docker compose up --build backend
 ```
 
+Or start the full stack from this frontend repository:
+
+```bash
+docker compose up --build
+```
+
 If the backend uses a different port, update `.env` in this repository:
 
 ```bash

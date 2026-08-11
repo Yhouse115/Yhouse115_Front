@@ -1,0 +1,50 @@
+services:
+  backend:
+    build:
+      context: ../WhyHouse_Back
+    container_name: whyhouse-backend
+    env_file:
+      - path: ../WhyHouse_Back/.env
+        required: false
+    environment:
+      APP_ENV: ${APP_ENV:-local}
+      APP_NAME: ${APP_NAME:-WhyHouse Backend}
+      APP_VERSION: ${APP_VERSION:-0.1.0}
+      API_PREFIX: ${API_PREFIX:-/api/v1}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ../WhyHouse_Back/app:/app/app:ro
+    networks:
+      - whyhouse
+
+  frontend:
+    image: node:22-alpine
+    container_name: whyhouse-frontend
+    working_dir: /app
+    command: >
+      sh -c "npm install &&
+      ${FRONTEND_COMMAND:-npm run dev -- --host 0.0.0.0 --port 3000}"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      VITE_APP_NAME: ${VITE_APP_NAME:-WhyHouse Front}
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    volumes:
+      - .:/app
+      - frontend_node_modules:/app/node_modules
+    depends_on:
+      - backend
+    networks:
+      - whyhouse
+
+networks:
+  whyhouse:
+    name: whyhouse-network
+
+volumes:
+  frontend_node_modules:

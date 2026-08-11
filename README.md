@@ -22,6 +22,15 @@ npm run build
 
 ## Docker Compose
 
+프론트 레포에서 전체 로컬 스택 실행:
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+백엔드 레포의 기존 MSA compose로 실행:
+
 ```bash
 cd ../WhyHouse_Back
 cp .env.example .env
@@ -31,5 +40,6 @@ docker compose --profile msa up --build
 ## Documents
 
 - [Frontend Architecture](docs/frontend-architecture.md)
+- [Design](docs/design.md)
 - [Development Workflow](docs/development-workflow.md)
 - [Troubleshooting](docs/troubleshooting.md)
