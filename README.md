@@ -45,6 +45,22 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
+기본적으로 프론트 레포와 백엔드 레포가 같은 상위 폴더 아래에 있다고 가정합니다.
+
+```text
+workspace/
+  WhyHouse_Front/
+  WhyHouse_Back/
+```
+
+팀원별로 백엔드 폴더명이 다르면 `.env`의 `BACKEND_CONTEXT`만 본인 경로에 맞게 바꾸면 됩니다.
+
+```bash
+BACKEND_CONTEXT=../your-backend-folder-name
+```
+
+`BACKEND_CONTEXT`가 가리키는 폴더에는 백엔드 `Dockerfile`, `app/`, `docker/postgres/init.sql`이 있어야 합니다.
+
 실행되는 서비스:
 
 - `whyhouse-database`: local PostGIS/Postgres
