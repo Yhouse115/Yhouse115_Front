@@ -623,11 +623,12 @@ a {
 }
 
 .search-slide {
+  position: relative;
   display: flex;
   width: 0;
   gap: 7px;
   margin-left: -20px;
-  overflow: hidden;
+  overflow: visible;
   opacity: 0;
   transition:
     width 380ms ease,
@@ -750,6 +751,7 @@ a {
 }
 
 .sidebar-search {
+  position: relative;
   display: flex;
   gap: 7px;
 }
@@ -771,6 +773,66 @@ a {
 .apartment-list {
   display: grid;
   gap: 8px;
+}
+
+.apartment-suggestions {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: 0;
+  left: 0;
+  z-index: 20;
+  display: grid;
+  gap: 3px;
+  padding: 7px;
+  border: 1px solid #e6e6e8;
+  border-radius: 15px;
+  background: #ffffff;
+  box-shadow: 0 16px 38px rgba(15, 31, 61, 0.18);
+}
+
+.apartment-suggestions button {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  border-radius: 11px;
+  background: #ffffff;
+  color: #090809;
+  text-align: left;
+}
+
+.apartment-suggestions button:hover {
+  background: #eff8f1;
+}
+
+.apartment-suggestions span {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 50% 50% 50% 8px;
+  background: #a5d3a8;
+  color: #ffffff;
+  font-size: 0.68rem;
+  font-weight: 900;
+  transform: rotate(-45deg);
+}
+
+.apartment-suggestions b,
+.apartment-suggestions small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.apartment-suggestions small {
+  grid-column: 2;
+  color: #656365;
+  font-size: 0.68rem;
 }
 
 .apartment-option {
@@ -991,12 +1053,24 @@ a {
   align-items: center;
   min-height: 36px;
   gap: 7px;
-  padding: 7px 14px;
+  padding: 7px 11px;
   border: 1px solid #e6e6e8;
   border-radius: 13px;
   background: #ffffff;
   color: #090809;
   white-space: nowrap;
+}
+
+.facility-filter:nth-child(5) {
+  padding-right: 10px;
+  padding-left: 10px;
+}
+
+.facility-filter--reset {
+  border-color: #dedee2;
+  background: #f6f6f7;
+  color: #686668;
+  font-size: 0.78rem;
 }
 
 .facility-filter--active {
@@ -1055,8 +1129,30 @@ a {
 }
 
 .map-pin--home {
-  width: 44px;
-  height: 44px;
+  width: 58px;
+  height: 58px;
+  animation: home-pin-float 2.2s ease-in-out infinite;
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+
+.map-pin--home:hover {
+  box-shadow: 0 12px 26px rgba(15, 31, 61, 0.3);
+  transform: rotate(-45deg) scale(1.12);
+}
+
+.map-pin--home b {
+  font-size: 0.95rem;
+}
+
+@keyframes home-pin-float {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+
+  50% {
+    translate: 0 -5px;
+  }
 }
 
 .map-apartment-caption,

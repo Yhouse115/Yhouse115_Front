@@ -5,6 +5,7 @@ import waezipLogo from '../assets/waezip-logo.png';
 
 type MapStatus = 'loading' | 'ready' | 'missing-key' | 'error';
 type FacilityKey = 'all' | 'kids' | 'school' | 'crosswalk' | 'signal' | 'cctv' | 'risk';
+type ActiveFacilityKey = Exclude<FacilityKey, 'all'>;
 
 type Apartment = {
   name: string;
@@ -48,6 +49,46 @@ type NaverMapsEvent = {
 };
 
 const apartmentOptions: Apartment[] = [
+  {
+    name: '목동신시가지 7단지 아파트',
+    address: '서울 양천구 목동로 212',
+    lat: 37.5287,
+    lng: 126.8755,
+    built: '1986년 준공',
+    radius: '반경 1km',
+  },
+  {
+    name: '목동신시가지 5단지 아파트',
+    address: '서울 양천구 목동동로 350',
+    lat: 37.5351,
+    lng: 126.8787,
+    built: '1986년 준공',
+    radius: '반경 1km',
+  },
+  {
+    name: '목동신시가지 9단지 아파트',
+    address: '서울 양천구 목동서로 340',
+    lat: 37.5203,
+    lng: 126.8846,
+    built: '1987년 준공',
+    radius: '반경 1km',
+  },
+  {
+    name: '목동신시가지 13단지 아파트',
+    address: '서울 양천구 목동동로 100',
+    lat: 37.5148,
+    lng: 126.8758,
+    built: '1987년 준공',
+    radius: '반경 1km',
+  },
+  {
+    name: '목동 하이페리온 아파트',
+    address: '서울 양천구 오목로 300',
+    lat: 37.5245,
+    lng: 126.8704,
+    built: '2003년 준공',
+    radius: '반경 1km',
+  },
   {
     name: '광화문 스페이스본',
     address: '서울 종로구 사직로8길 4',
@@ -172,7 +213,7 @@ function loadNaverMaps(clientId: string): Promise<void> {
 }
 
 function getMarkerIcon(label: string, color: string, variant: 'home' | 'facility') {
-  const size = variant === 'home' ? 44 : 38;
+  const size = variant === 'home' ? 58 : 38;
   const radius = size / 2;
 
   return {
@@ -185,12 +226,25 @@ function getMarkerIcon(label: string, color: string, variant: 'home' | 'facility
   };
 }
 
-function getVisibleFacilities(activeFilter: FacilityKey) {
-  if (activeFilter === 'all') {
+function getApartmentSuggestions(term: string, limit: number) {
+  const normalized = term.trim().toLowerCase();
+  if (!normalized) {
+    return [];
+  }
+
+  const matches = apartmentOptions.filter((apartment) =>
+    `${apartment.name} ${apartment.address}`.toLowerCase().includes(normalized),
+  );
+
+  return [...matches, ...apartmentOptions.filter((apartment) => !matches.includes(apartment))].slice(0, limit);
+}
+
+function getVisibleFacilities(activeFilters: ActiveFacilityKey[]) {
+  if (activeFilters.length === 0) {
     return facilities;
   }
 
-  return facilities.filter((facility) => facility.key === activeFilter);
+  return facilities.filter((facility) => activeFilters.includes(facility.key));
 }
 
 export function NaverMapPreview({
@@ -211,12 +265,15 @@ export function NaverMapPreview({
   const [selectedApartment, setSelectedApartment] = useState<Apartment | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [topSearchOpen, setTopSearchOpen] = useState(false);
-  const [activeFilter, setActiveFilter] = useState<FacilityKey>('all');
+  const [activeFilters, setActiveFilters] = useState<ActiveFacilityKey[]>([]);
   const [animatedFilter, setAnimatedFilter] = useState<FacilityKey | null>(null);
   const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
   const [compareTarget, setCompareTarget] = useState<string>(compareApartments[0]);
 
-  const visibleFacilities = useMemo(() => getVisibleFacilities(activeFilter), [activeFilter]);
+  const visibleFacilities = useMemo(() => getVisibleFacilities(activeFilters), [activeFilters]);
+  const topApartmentSuggestions = useMemo(() => getApartmentSuggestions(searchTerm, 6), [searchTerm]);
+  const sidebarApartmentSuggestions = useMemo(() => getApartmentSuggestions(searchTerm, 3), [searchTerm]);
+  const sidebarApartmentOptions = apartmentOptions.slice(0, 3);
   const compareTargetValues = compareValues[compareTarget] ?? compareValues[compareApartments[0]];
 
   useEffect(() => {
@@ -335,10 +392,31 @@ export function NaverMapPreview({
   }
 
   function changeFilter(nextFilter: FacilityKey) {
-    setActiveFilter(nextFilter);
+    if (nextFilter === 'all') {
+      setActiveFilters([]);
+    } else {
+      setActiveFilters((current) =>
+        current.includes(nextFilter)
+          ? current.filter((filter) => filter !== nextFilter)
+          : [...current, nextFilter],
+      );
+    }
     setAnimatedFilter(nextFilter);
     setSelectedFacility(null);
     window.setTimeout(() => setAnimatedFilter(null), 420);
+  }
+
+  function resetFilters() {
+    setActiveFilters([]);
+    setAnimatedFilter('all');
+    setSelectedFacility(null);
+    window.setTimeout(() => setAnimatedFilter(null), 420);
+  }
+
+  function selectSuggestion(apartment: Apartment) {
+    selectApartment(apartment);
+    setSearchTerm('');
+    setTopSearchOpen(false);
   }
 
   return (
@@ -371,6 +449,17 @@ export function NaverMapPreview({
               value={searchTerm}
             />
             <button type="submit">검색</button>
+            {topApartmentSuggestions.length > 0 && (
+              <div className="apartment-suggestions" role="listbox">
+                {topApartmentSuggestions.map((apartment) => (
+                  <button key={apartment.name} onMouseDown={(event) => event.preventDefault()} onClick={() => selectSuggestion(apartment)} role="option" type="button">
+                    <span aria-hidden="true">집</span>
+                    <b>{apartment.name}</b>
+                    <small>{apartment.address}</small>
+                  </button>
+                ))}
+              </div>
+            )}
           </form>
         </div>
       </header>
@@ -402,10 +491,21 @@ export function NaverMapPreview({
               value={searchTerm}
             />
             <button type="submit">검색</button>
+            {sidebarApartmentSuggestions.length > 0 && (
+              <div className="apartment-suggestions" role="listbox">
+                {sidebarApartmentSuggestions.map((apartment) => (
+                  <button key={apartment.name} onMouseDown={(event) => event.preventDefault()} onClick={() => selectSuggestion(apartment)} role="option" type="button">
+                    <span aria-hidden="true">집</span>
+                    <b>{apartment.name}</b>
+                    <small>{apartment.address}</small>
+                  </button>
+                ))}
+              </div>
+            )}
           </form>
 
           <div className="apartment-list">
-            {apartmentOptions.map((apartment) => (
+            {sidebarApartmentOptions.map((apartment) => (
               <button
                 className="apartment-option"
                 key={apartment.name}
@@ -473,8 +573,9 @@ export function NaverMapPreview({
                 <div>
                   <b>무엇을 지도에서 볼까요?</b>
                   <p className="apartment-mini-summary">
-                    <span>연혁 · {selectedApartment.built}</span>
-                    <span>안전거리 · {selectedApartment.radius}</span>
+                    <span>어린이시설 8곳</span>
+                    <span>학교 도보 7분</span>
+                    <span>보행신호 4개</span>
                   </p>
                 </div>
                 <button onClick={openSidebar} type="button">🏢 아파트 다시 선택</button>
@@ -483,7 +584,9 @@ export function NaverMapPreview({
                 {facilityFilters.map((filter) => (
                   <button
                     className={[
-                      activeFilter === filter.key ? 'facility-filter facility-filter--active' : 'facility-filter',
+                      (filter.key === 'all' ? activeFilters.length === 0 : activeFilters.includes(filter.key))
+                        ? 'facility-filter facility-filter--active'
+                        : 'facility-filter',
                       animatedFilter === filter.key ? 'facility-filter--pop' : '',
                     ].join(' ')}
                     key={filter.key}
@@ -494,6 +597,10 @@ export function NaverMapPreview({
                     {filter.label}
                   </button>
                 ))}
+                <button className="facility-filter facility-filter--reset" onClick={resetFilters} type="button">
+                  <span aria-hidden="true">↺</span>
+                  초기화
+                </button>
               </div>
             </div>
           )}

@@ -43,10 +43,11 @@ describe('App', () => {
     });
 
     expect(screen.getByText('아파트를 먼저 선택하세요')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /광화문 스페이스본/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /목동신시가지 7단지 아파트/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /목동신시가지 13단지 아파트/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /왜집의 임장노트/ })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /광화문 스페이스본/ }));
+    fireEvent.click(screen.getByRole('button', { name: /목동신시가지 7단지 아파트/ }));
 
     expect(screen.getByText('무엇을 지도에서 볼까요?')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /아파트 다시 선택/ })).toBeInTheDocument();
