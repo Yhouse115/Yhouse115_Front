@@ -2,9 +2,9 @@ import { useEffect, useState, type ReactNode } from 'react';
 
 import { HealthCheck } from './components/HealthCheck';
 import { NaverMapPreview } from './components/NaverMapPreview';
-import { env } from './config/env';
 import investmentImage from './assets/landing-investment-card.png';
 import familyImage from './assets/landing-family-card.png';
+import waezipLogo from './assets/waezip-logo.png';
 
 const routes = {
   home: '/',
@@ -19,42 +19,69 @@ function navigateTo(path: string) {
 
 function LandingPage() {
   return (
-    <main className="landing-shell">
-      <header className="landing-header">
-        <p className="eyebrow">{env.appName}</p>
-        <h1>집을 고르는 두 가지 관점</h1>
-        <p>
-          실거래 흐름을 기록하는 투자 관점과 아이가 지내는 생활권을 살피는 지도
-          관점을 나눠서 검토합니다.
-        </p>
+    <>
+      <header className="landing-bar">
+        <button aria-label="왜집 홈" className="landing-logo" type="button">
+          <img alt="왜집?" src={waezipLogo} />
+        </button>
+        <p>집을 보는 두 가지 시선</p>
       </header>
+      <main className="landing-shell">
+        <section className="landing-choice" aria-label="WhyHouse entry routes">
+          <div className="landing-intro">
+            <span className="eyebrow">우리 집을 이해하는 새로운 방식</span>
+            <h1>
+              어떤 시선으로
+              <br />
+              집을 볼까요?
+            </h1>
+            <p>
+              복잡한 점수 대신, 지도와 기록으로 직접 판단할 수 있게 도와드려요.
+            </p>
+          </div>
 
-      <section className="choice-grid" aria-label="WhyHouse entry routes">
-        <button className="choice-card choice-card--investment" onClick={() => navigateTo(routes.investment)} type="button">
-          <span className="choice-number">01</span>
-          <img alt="지도와 집을 살펴보는 강아지 일러스트" className="choice-image" src={investmentImage} />
-          <span className="choice-chip">현장을 살펴봐요!</span>
-          <span className="choice-meta">부동산 투자 기록</span>
-          <strong>왜집의 입장노트</strong>
-          <span className="choice-description">
-            실거래와 시세 흐름을 보고, 관심 있는 집에 대한 생각을 기록해요.
-          </span>
-          <span className="choice-link">투자 관점으로 보기 →</span>
-        </button>
+          <div className="choice-grid">
+            <button className="choice-card choice-card--investment" onClick={() => navigateTo(routes.investment)} type="button">
+              <span className="choice-number">01</span>
+              <span className="choice-art">
+                <img alt="지도와 집을 살펴보는 강아지 일러스트" className="choice-image" src={investmentImage} />
+                <span className="choice-chip">현장을 살펴봐요!</span>
+              </span>
+              <span className="choice-title-row">
+                <span className="choice-icon" aria-hidden="true">▤</span>
+                <span>
+                  <span className="choice-meta">부동산 투자 기록</span>
+                  <strong>왜집의 입장노트</strong>
+                </span>
+              </span>
+              <span className="choice-description">
+                실거래와 시세 흐름을 보고, 관심 있는 집에 대한 생각을 기록해요.
+              </span>
+              <span className="choice-link">투자 관점으로 보기 →</span>
+            </button>
 
-        <button className="choice-card choice-card--family" onClick={() => navigateTo(routes.familyMap)} type="button">
-          <span className="choice-number">02</span>
-          <img alt="집 주변 생활권을 안내하는 강아지 일러스트" className="choice-image" src={familyImage} />
-          <span className="choice-chip">같이 살펴봐요!</span>
-          <span className="choice-meta">아이친화 생활 지도</span>
-          <strong>이집 어때요?</strong>
-          <span className="choice-description">
-            학교, 횡단보도, CCTV와 주의구간을 지도에서 한눈에 살펴봐요.
-          </span>
-          <span className="choice-link">지도로 살펴보기 →</span>
-        </button>
-      </section>
-    </main>
+            <button className="choice-card choice-card--family" onClick={() => navigateTo(routes.familyMap)} type="button">
+              <span className="choice-number">02</span>
+              <span className="choice-art">
+                <img alt="집 주변 생활권을 안내하는 강아지 일러스트" className="choice-image" src={familyImage} />
+                <span className="choice-chip">같이 살펴봐요!</span>
+              </span>
+              <span className="choice-title-row">
+                <span className="choice-icon" aria-hidden="true">⌖</span>
+                <span>
+                  <span className="choice-meta">아이친화 생활 지도</span>
+                  <strong>이집 어때요?</strong>
+                </span>
+              </span>
+              <span className="choice-description">
+                학교, 횡단보도, CCTV와 주의구간을 지도에서 한눈에 살펴봐요.
+              </span>
+              <span className="choice-link">지도로 살펴보기 →</span>
+            </button>
+          </div>
+        </section>
+      </main>
+    </>
   );
 }
 
