@@ -42,7 +42,6 @@ describe('App', () => {
       expect(screen.getByRole('complementary', { name: '아파트 선택과 비교' })).toBeInTheDocument();
     });
 
-    expect(screen.getByText('아파트를 먼저 선택하세요')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /목동신시가지 7단지 아파트/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /목동신시가지 13단지 아파트/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /왜집의 임장노트/ })).toBeInTheDocument();

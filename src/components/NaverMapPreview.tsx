@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { env } from '../config/env';
+import waezipHomeMarker from '../assets/waezip-home-marker.png';
 import waezipLogo from '../assets/waezip-logo.png';
 
 type MapStatus = 'loading' | 'ready' | 'missing-key' | 'error';
@@ -212,9 +213,20 @@ function loadNaverMaps(clientId: string): Promise<void> {
   return window.__whyhouseNaverMapLoading;
 }
 
-function getMarkerIcon(label: string, color: string, variant: 'home' | 'facility') {
+function getMarkerIcon(label: string, color: string, variant: 'home' | 'facility', imageUrl?: string) {
   const size = variant === 'home' ? 58 : 38;
   const radius = size / 2;
+
+  if (variant === 'home' && imageUrl) {
+    return {
+      content: `
+        <span class="map-character-pin" style="--pin-color: ${color}">
+          <img alt="${label}" src="${imageUrl}" />
+        </span>
+      `,
+      anchor: window.naver ? new window.naver.maps.Point(radius + 8, radius + 34) : undefined,
+    };
+  }
 
   return {
     content: `
@@ -245,6 +257,10 @@ function getVisibleFacilities(activeFilters: ActiveFacilityKey[]) {
   }
 
   return facilities.filter((facility) => activeFilters.includes(facility.key));
+}
+
+function getBubbleApartmentName(name: string) {
+  return Array.from(name.replace(/\s+/g, '')).slice(0, 8).join('');
 }
 
 export function NaverMapPreview({
@@ -356,7 +372,7 @@ export function NaverMapPreview({
           position: center,
           map,
           title: apartment.name,
-          icon: getMarkerIcon('집', facilityColors.home, 'home'),
+          icon: getMarkerIcon('집', facilityColors.home, 'home', waezipHomeMarker),
         });
       } else {
         apartmentMarkerRef.current.setPosition?.(center);
@@ -619,13 +635,23 @@ export function NaverMapPreview({
                 <span>네이버 콘솔의 Web 서비스 URL과 Client ID를 확인하세요.</span>
               </div>
             )}
-            {status === 'ready' && !selectedApartment && (
-              <div className="map-message map-message--soft">
-                <strong>아파트를 먼저 선택하세요</strong>
-                <span>왼쪽 사이드바에서 기준 아파트를 선택해 주세요.</span>
-              </div>
-            )}
           </div>
+
+          {status === 'ready' && !selectedApartment && (
+            <div className="apartment-bubble-layer" aria-label="지도에서 아파트 선택">
+              {sidebarApartmentOptions.map((apartment) => (
+                <button
+                  className="apartment-map-bubble"
+                  key={apartment.name}
+                  onClick={() => selectApartment(apartment)}
+                  title={apartment.name}
+                  type="button"
+                >
+                  {getBubbleApartmentName(apartment.name)}
+                </button>
+              ))}
+            </div>
+          )}
 
           {selectedApartment && (
             <div className="map-apartment-caption">
