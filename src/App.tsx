@@ -125,9 +125,10 @@ function InvestmentPage() {
 
 function FamilyMapPage() {
   return (
-    <PageFrame title="아이친화 생활 지도">
-      <NaverMapPreview />
-    </PageFrame>
+    <NaverMapPreview
+      onBackHome={() => navigateTo(routes.home)}
+      onOpenInvestment={() => navigateTo(routes.investment)}
+    />
   );
 }
 

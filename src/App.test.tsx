@@ -39,29 +39,20 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: /이집 어때요/ }));
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /기본 지도를 먼저 확인해요/ })).toBeInTheDocument();
+      expect(screen.getByRole('complementary', { name: '아파트 선택과 비교' })).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole('button', { name: '지도 설정' }));
 
-    expect(screen.getByRole('dialog', { name: '지도 스타일 설정' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '지도 표시 설정' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /네이버 기본.*Style ID/ })).toHaveClass(
-      'style-preset-button--active',
-    );
-    expect(screen.getByRole('button', { name: /운영 커스텀.*Style ID/ })).toBeInTheDocument();
-    const subwayToggle = screen.getByLabelText(/지하철역 표시/);
-    expect(subwayToggle).toBeChecked();
-    fireEvent.click(subwayToggle);
-    expect(subwayToggle).not.toBeChecked();
-    expect(screen.getByText(/샘플 지하철역 마커는 숨겨졌습니다/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '운영 표시 기본값으로 되돌리기' }));
-    expect(subwayToggle).toBeChecked();
-    expect(screen.getByLabelText('지하철역 색상')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '위성' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '지형' })).not.toBeInTheDocument();
+    expect(screen.getByText('아파트를 먼저 선택하세요')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /광화문 스페이스본/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /왜집의 임장노트/ })).toBeInTheDocument();
 
-    await waitFor(() => {
-      expect(screen.getByText('Backend connected')).toBeInTheDocument();
-    });
+    fireEvent.click(screen.getByRole('button', { name: /광화문 스페이스본/ }));
+
+    expect(screen.getByText('무엇을 지도에서 볼까요?')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /아파트 다시 선택/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /CCTV/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /CCTV/ }));
+    expect(screen.getByRole('button', { name: /CCTV/ })).toHaveClass('facility-filter--active');
+    expect(screen.getByText('이 아파트 주변을 살펴보고 있어요')).toBeInTheDocument();
   });
 });
