@@ -3,129 +3,74 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { env } from '../config/env';
 import waezipHomeMarker from '../assets/waezip-home-marker.png';
 import waezipLogo from '../assets/waezip-logo.png';
+import {
+  getFeaturesInBounds,
+  getNearbyFeatures,
+  searchApartments,
+  type ApartmentSummary,
+  type FacilityCategory,
+  type FeatureSummary,
+  type MapFeature,
+} from '../services/familyMap';
 
 type MapStatus = 'loading' | 'ready' | 'missing-key' | 'error';
 type FacilityKey = 'all' | 'kids' | 'school' | 'crosswalk' | 'signal' | 'cctv' | 'risk';
 type ActiveFacilityKey = Exclude<FacilityKey, 'all'>;
-
-type Apartment = {
-  name: string;
-  address: string;
-  lat: number;
-  lng: number;
-  built: string;
-  radius: string;
-};
-
-type Facility = {
-  key: Exclude<FacilityKey, 'all'>;
-  label: string;
-  detail: string;
-  lat: number;
-  lng: number;
-};
 
 type MapOptions = {
   center?: unknown;
   zoom?: number;
   zoomControl?: boolean;
   scaleControl?: boolean;
+  scaleControlOptions?: {
+    position?: unknown;
+  };
   mapDataControl?: boolean;
 };
 
 type MapInstance = {
   setCenter?: (center: unknown) => void;
   setZoom?: (zoom: number) => void;
+  getZoom?: () => number;
+  getBounds?: () => {
+    getSW: () => { lat: () => number; lng: () => number };
+    getNE: () => { lat: () => number; lng: () => number };
+  };
 };
 
 type MarkerInstance = {
   setMap: (map: MapInstance | null) => void;
   setIcon?: (icon: { content: string; anchor?: unknown }) => void;
   setPosition?: (position: unknown) => void;
+  setZIndex?: (zIndex: number) => void;
 };
 
 type NaverMapsEvent = {
-  addListener: (target: MarkerInstance, eventName: string, listener: () => void) => void;
+  addListener: (
+    target: MarkerInstance | MapInstance,
+    eventName: string,
+    listener: (event?: { stop?: () => void }) => void,
+  ) => void;
   trigger?: (target: MapInstance, eventName: string) => void;
 };
 
-const apartmentOptions: Apartment[] = [
-  {
-    name: '목동신시가지 7단지 아파트',
-    address: '서울 양천구 목동로 212',
-    lat: 37.5287,
-    lng: 126.8755,
-    built: '1986년 준공',
-    radius: '반경 1km',
-  },
-  {
-    name: '목동신시가지 5단지 아파트',
-    address: '서울 양천구 목동동로 350',
-    lat: 37.5351,
-    lng: 126.8787,
-    built: '1986년 준공',
-    radius: '반경 1km',
-  },
-  {
-    name: '목동신시가지 9단지 아파트',
-    address: '서울 양천구 목동서로 340',
-    lat: 37.5203,
-    lng: 126.8846,
-    built: '1987년 준공',
-    radius: '반경 1km',
-  },
-  {
-    name: '목동신시가지 13단지 아파트',
-    address: '서울 양천구 목동동로 100',
-    lat: 37.5148,
-    lng: 126.8758,
-    built: '1987년 준공',
-    radius: '반경 1km',
-  },
-  {
-    name: '목동 하이페리온 아파트',
-    address: '서울 양천구 오목로 300',
-    lat: 37.5245,
-    lng: 126.8704,
-    built: '2003년 준공',
-    radius: '반경 1km',
-  },
-  {
-    name: '광화문 스페이스본',
-    address: '서울 종로구 사직로8길 4',
-    lat: 37.5714,
-    lng: 126.9768,
-    built: '2008년 준공',
-    radius: '반경 1km',
-  },
-  {
-    name: '서울숲 트리마제',
-    address: '서울 성동구 왕십리로 16',
-    lat: 37.5446,
-    lng: 127.0559,
-    built: '2017년 준공',
-    radius: '반경 1km',
-  },
-  {
-    name: '분당 파크뷰',
-    address: '경기 성남시 분당구 정자일로 248',
-    lat: 37.3595,
-    lng: 127.1052,
-    built: '2004년 준공',
-    radius: '반경 1km',
-  },
-];
-
-const compareApartments = ['서울숲 트리마제', '연남 코오롱하늘채', '분당 파크뷰'] as const;
-
-const compareValues: Record<string, string[]> = {
-  '서울숲 트리마제': ['11곳', '12곳', '31대', '4곳'],
-  '연남 코오롱하늘채': ['9곳', '10곳', '24대', '5곳'],
-  '분당 파크뷰': ['13곳', '17곳', '29대', '2곳'],
+type BoundsLike = {
+  getSW: () => { lat: () => number; lng: () => number };
+  getNE: () => { lat: () => number; lng: () => number };
 };
 
-const baseValues = ['8곳', '14곳', '26대', '3곳'];
-const compareLabels = ['초등학교 · 어린이시설', '안전 횡단보도', 'CCTV', '주의 구간'];
+type DisplayMarker = {
+  id: string;
+  category: FacilityCategory;
+  name: string;
+  latitude: number;
+  longitude: number;
+  count: number;
+  features: MapFeature[];
+};
+
+const facilityCategoryKeys: FacilityCategory[] = ['kids', 'school', 'crosswalk', 'signal', 'cctv', 'risk'];
+const defaultActiveFilters: ActiveFacilityKey[] = ['kids', 'school'];
 
 const facilityFilters: Array<{ key: FacilityKey; label: string; icon: string }> = [
   { key: 'all', label: '전체', icon: '🗺️' },
@@ -135,15 +80,6 @@ const facilityFilters: Array<{ key: FacilityKey; label: string; icon: string }> 
   { key: 'signal', label: '보행신호', icon: '🚦' },
   { key: 'cctv', label: 'CCTV', icon: '📹' },
   { key: 'risk', label: '주의구간', icon: '⚠️' },
-];
-
-const facilities: Facility[] = [
-  { key: 'school', label: '정수초등학교', detail: '도보권 초등학교', lat: 37.5722, lng: 126.9753 },
-  { key: 'kids', label: '장난감도서관', detail: '어린이 활동 시설', lat: 37.5704, lng: 126.9736 },
-  { key: 'crosswalk', label: '안심 횡단보도', detail: '어린이 보호구역 인접', lat: 37.5702, lng: 126.9791 },
-  { key: 'signal', label: '보행신호 교차로', detail: '보행 신호 운영 구간', lat: 37.5689, lng: 126.9782 },
-  { key: 'cctv', label: '생활안전 CCTV', detail: '주요 보행로 감시 지점', lat: 37.5688, lng: 126.9746 },
-  { key: 'risk', label: '주의 통학로', detail: '차량 진입이 잦은 구간', lat: 37.5731, lng: 126.9787 },
 ];
 
 const facilityColors: Record<Exclude<FacilityKey, 'all'> | 'home', string> = {
@@ -162,6 +98,9 @@ declare global {
       maps: {
         LatLng: new (lat: number, lng: number) => unknown;
         Point: new (x: number, y: number) => unknown;
+        Position: {
+          BOTTOM_RIGHT: unknown;
+        };
         Map: new (element: HTMLElement, options: MapOptions) => MapInstance;
         Marker: new (options: {
           position: unknown;
@@ -171,6 +110,7 @@ declare global {
             content: string;
             anchor?: unknown;
           };
+          zIndex?: number;
         }) => MarkerInstance;
         Event: NaverMapsEvent;
       };
@@ -238,29 +178,136 @@ function getMarkerIcon(label: string, color: string, variant: 'home' | 'facility
   };
 }
 
-function getApartmentSuggestions(term: string, limit: number) {
-  const normalized = term.trim().toLowerCase();
-  if (!normalized) {
-    return [];
-  }
-
-  const matches = apartmentOptions.filter((apartment) =>
-    `${apartment.name} ${apartment.address}`.toLowerCase().includes(normalized),
-  );
-
-  return [...matches, ...apartmentOptions.filter((apartment) => !matches.includes(apartment))].slice(0, limit);
+function getClusterMarkerIcon(label: string, color: string, count: number) {
+  return {
+    content: `
+      <span class="map-cluster-pin" style="--pin-color: ${color}">
+        <b>${label}</b>
+        <em>${count}</em>
+      </span>
+    `,
+    anchor: window.naver ? new window.naver.maps.Point(24, 24) : undefined,
+  };
 }
 
-function getVisibleFacilities(activeFilters: ActiveFacilityKey[]) {
-  if (activeFilters.length === 0) {
-    return facilities;
+function filterApartmentSuggestions(apartments: ApartmentSummary[], term: string, limit: number) {
+  const normalized = term.trim().toLowerCase();
+  if (!normalized) {
+    return apartments.slice(0, limit);
   }
 
-  return facilities.filter((facility) => activeFilters.includes(facility.key));
+  return apartments.filter((apartment) => apartment.name.toLowerCase().includes(normalized)).slice(0, limit);
+}
+
+function getActiveCategories(activeFilters: ActiveFacilityKey[]): FacilityCategory[] {
+  return activeFilters;
 }
 
 function getBubbleApartmentName(name: string) {
   return Array.from(name.replace(/\s+/g, '')).slice(0, 8).join('');
+}
+
+function getFeatureLabel(category: FacilityCategory) {
+  return facilityFilters.find((filter) => filter.key === category)?.label ?? category;
+}
+
+function formatFeatureDetail(feature: MapFeature) {
+  const clusteredCount = feature.metadata?.count;
+  if (typeof clusteredCount === 'number' && clusteredCount > 1) {
+    return `${clusteredCount}개 지점이 모여 있습니다.`;
+  }
+
+  if (feature.distance_m != null) {
+    return `${Math.round(feature.distance_m)}m 거리`;
+  }
+
+  return feature.address ?? getFeatureLabel(feature.category);
+}
+
+function getSummaryCount(summary: FeatureSummary[], category: FacilityCategory) {
+  return summary.find((item) => item.category === category)?.count ?? 0;
+}
+
+function getFeatureSummaryItems(summary: FeatureSummary[]) {
+  return [
+    { key: 'kids' as const, label: '어린이시설', value: `${getSummaryCount(summary, 'kids')}곳` },
+    { key: 'school' as const, label: '학교', value: `${getSummaryCount(summary, 'school')}곳` },
+    { key: 'crosswalk' as const, label: '횡단보도', value: `${getSummaryCount(summary, 'crosswalk')}개` },
+    { key: 'signal' as const, label: '보행신호', value: `${getSummaryCount(summary, 'signal')}개` },
+    { key: 'cctv' as const, label: 'CCTV', value: `${getSummaryCount(summary, 'cctv')}대` },
+    { key: 'risk' as const, label: '주의구간', value: `${getSummaryCount(summary, 'risk')}곳` },
+  ];
+}
+
+function getClusterGridMeters(zoom: number) {
+  if (zoom <= 13) {
+    return 600;
+  }
+  if (zoom <= 14) {
+    return 360;
+  }
+  if (zoom <= 15) {
+    return 320;
+  }
+  if (zoom <= 16) {
+    return 160;
+  }
+  return 0;
+}
+
+function getDisplayMarkers(features: MapFeature[], zoom: number): DisplayMarker[] {
+  if (features.some((feature) => feature.source === 'cluster')) {
+    return features.filter((feature) => zoom < 17 || feature.source !== 'cluster').map((feature) => {
+      const count = typeof feature.metadata?.count === 'number' ? feature.metadata.count : 1;
+      return {
+        id: feature.id,
+        category: feature.category,
+        name: count > 1 ? `${getFeatureLabel(feature.category)} ${count}개` : feature.name,
+        latitude: feature.latitude,
+        longitude: feature.longitude,
+        count,
+        features: [feature],
+      };
+    });
+  }
+
+  const gridMeters = getClusterGridMeters(zoom);
+  if (gridMeters === 0) {
+    return features.map((feature) => ({
+      id: feature.id,
+      category: feature.category,
+      name: feature.name,
+      latitude: feature.latitude,
+      longitude: feature.longitude,
+      count: 1,
+      features: [feature],
+    }));
+  }
+
+  const buckets = new Map<string, MapFeature[]>();
+  for (const feature of features) {
+    const latGrid = gridMeters / 111320;
+    const lngGrid = gridMeters / (111320 * Math.cos((feature.latitude * Math.PI) / 180));
+    const latKey = Math.round(feature.latitude / latGrid);
+    const lngKey = Math.round(feature.longitude / lngGrid);
+    const key = `${feature.category}:${latKey}:${lngKey}`;
+    buckets.set(key, [...(buckets.get(key) ?? []), feature]);
+  }
+
+  return Array.from(buckets.entries()).map(([key, bucket]) => {
+    const latitude = bucket.reduce((sum, feature) => sum + feature.latitude, 0) / bucket.length;
+    const longitude = bucket.reduce((sum, feature) => sum + feature.longitude, 0) / bucket.length;
+    const category = bucket[0].category;
+    return {
+      id: key,
+      category,
+      name: bucket.length > 1 ? `${getFeatureLabel(category)} ${bucket.length}개` : bucket[0].name,
+      latitude,
+      longitude,
+      count: bucket.length,
+      features: bucket,
+    };
+  });
 }
 
 export function NaverMapPreview({
@@ -273,24 +320,52 @@ export function NaverMapPreview({
   const mapElementRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapInstance | null>(null);
   const apartmentMarkerRef = useRef<MarkerInstance | null>(null);
-  const facilityMarkerRefs = useRef<Array<{ marker: MarkerInstance; facility: Facility }>>([]);
+  const facilityMarkerRefs = useRef<Array<{ marker: MarkerInstance; item: DisplayMarker }>>([]);
+  const featureRequestIdRef = useRef(0);
+  const selectedApartmentRef = useRef<ApartmentSummary | null>(null);
+  const activeCategoriesRef = useRef<FacilityCategory[]>([]);
+  const boundsFetchTimerRef = useRef<number | null>(null);
+  const lastBoundsRequestKeyRef = useRef('');
+  const defaultApartmentOptionsRef = useRef<ApartmentSummary[]>([]);
   const [status, setStatus] = useState<MapStatus>(() =>
     env.naverMapsClientId ? 'loading' : 'missing-key',
   );
+  const [dataStatus, setDataStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [apartmentOptions, setApartmentOptions] = useState<ApartmentSummary[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [selectedApartment, setSelectedApartment] = useState<Apartment | null>(null);
+  const [selectedApartment, setSelectedApartment] = useState<ApartmentSummary | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [topSearchOpen, setTopSearchOpen] = useState(false);
-  const [activeFilters, setActiveFilters] = useState<ActiveFacilityKey[]>([]);
+  const [activeFilters, setActiveFilters] = useState<ActiveFacilityKey[]>(defaultActiveFilters);
   const [animatedFilter, setAnimatedFilter] = useState<FacilityKey | null>(null);
-  const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
-  const [compareTarget, setCompareTarget] = useState<string>(compareApartments[0]);
+  const [selectedFacility, setSelectedFacility] = useState<MapFeature | null>(null);
+  const [features, setFeatures] = useState<MapFeature[]>([]);
+  const [summary, setSummary] = useState<FeatureSummary[]>([]);
+  const [compareSummary, setCompareSummary] = useState<FeatureSummary[]>([]);
+  const [compareTarget, setCompareTarget] = useState<string>('');
+  const [currentZoom, setCurrentZoom] = useState(15);
 
-  const visibleFacilities = useMemo(() => getVisibleFacilities(activeFilters), [activeFilters]);
-  const topApartmentSuggestions = useMemo(() => getApartmentSuggestions(searchTerm, 6), [searchTerm]);
-  const sidebarApartmentSuggestions = useMemo(() => getApartmentSuggestions(searchTerm, 3), [searchTerm]);
+  const activeCategories = useMemo(() => getActiveCategories(activeFilters), [activeFilters]);
+  const topApartmentSuggestions = useMemo(
+    () => filterApartmentSuggestions(apartmentOptions, searchTerm, 12),
+    [apartmentOptions, searchTerm],
+  );
+  const sidebarApartmentSuggestions = useMemo(
+    () => filterApartmentSuggestions(apartmentOptions, searchTerm, 12),
+    [apartmentOptions, searchTerm],
+  );
   const sidebarApartmentOptions = apartmentOptions.slice(0, 3);
-  const compareTargetValues = compareValues[compareTarget] ?? compareValues[compareApartments[0]];
+  const compareApartmentOptions = apartmentOptions.filter((apartment) => apartment.id !== selectedApartment?.id).slice(0, 5);
+  const summaryItems = useMemo(() => getFeatureSummaryItems(compareSummary), [compareSummary]);
+  const displayMarkers = useMemo(() => getDisplayMarkers(features, currentZoom), [features, currentZoom]);
+
+  useEffect(() => {
+    selectedApartmentRef.current = selectedApartment;
+  }, [selectedApartment]);
+
+  useEffect(() => {
+    activeCategoriesRef.current = activeCategories;
+  }, [activeCategories]);
 
   useEffect(() => {
     if (!env.naverMapsClientId) {
@@ -305,31 +380,38 @@ export function NaverMapPreview({
           return;
         }
 
-        const center = new window.naver.maps.LatLng(37.5714, 126.9768);
+        const center = new window.naver.maps.LatLng(37.5245, 126.866);
         const map = new window.naver.maps.Map(mapElementRef.current, {
           center,
           zoom: 15,
           zoomControl: false,
           scaleControl: true,
+          scaleControlOptions: {
+            position: window.naver.maps.Position.BOTTOM_RIGHT,
+          },
           mapDataControl: true,
         });
 
-        facilityMarkerRefs.current = facilities.map((facility) => {
-          const marker = new window.naver!.maps.Marker({
-            position: new window.naver!.maps.LatLng(facility.lat, facility.lng),
-            map: null,
-            title: facility.label,
-            icon: getMarkerIcon(
-              facilityFilters.find((filter) => filter.key === facility.key)?.icon ?? '•',
-              facilityColors[facility.key],
-              'facility',
-            ),
-          });
-          window.naver!.maps.Event.addListener(marker, 'click', () => setSelectedFacility(facility));
-          return { marker, facility };
-        });
-
         mapRef.current = map;
+        setCurrentZoom(map.getZoom?.() ?? 15);
+        window.naver.maps.Event.addListener(map, 'idle', () => {
+          const zoom = map.getZoom?.() ?? 17;
+          setCurrentZoom(zoom);
+          if (!selectedApartmentRef.current) {
+            return;
+          }
+
+          if (boundsFetchTimerRef.current) {
+            window.clearTimeout(boundsFetchTimerRef.current);
+          }
+
+          boundsFetchTimerRef.current = window.setTimeout(() => {
+            void refreshFeaturesByBounds(activeCategoriesRef.current);
+          }, 420);
+        });
+        window.naver.maps.Event.addListener(map, 'click', () => {
+          setSelectedFacility(null);
+        });
         setStatus('ready');
       })
       .catch(() => {
@@ -340,31 +422,236 @@ export function NaverMapPreview({
 
     return () => {
       cancelled = true;
+      if (boundsFetchTimerRef.current) {
+        window.clearTimeout(boundsFetchTimerRef.current);
+      }
     };
   }, []);
 
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map) {
+    let cancelled = false;
+    setDataStatus('loading');
+    searchApartments('', 10)
+      .then((items) => {
+        if (cancelled) {
+          return;
+        }
+        setApartmentOptions(items);
+        defaultApartmentOptionsRef.current = items;
+        setCompareTarget(items[1]?.id ?? items[0]?.id ?? '');
+        setDataStatus('idle');
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDataStatus('error');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const normalized = searchTerm.trim();
+    if (!normalized) {
+      setApartmentOptions(defaultApartmentOptionsRef.current);
       return;
     }
 
-    facilityMarkerRefs.current.forEach(({ marker, facility }) => {
-      const shouldShow = Boolean(selectedApartment) && visibleFacilities.includes(facility);
-      marker.setMap(shouldShow ? map : null);
-    });
-  }, [selectedApartment, visibleFacilities]);
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      searchApartments(normalized, 20)
+        .then((items) => {
+          if (!cancelled) {
+            setApartmentOptions(items);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setApartmentOptions([]);
+          }
+        });
+    }, 180);
 
-  function selectApartment(apartment: Apartment) {
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [searchTerm]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !window.naver?.maps) {
+      return;
+    }
+
+    const triggerResize = () => window.naver?.maps.Event.trigger?.(map, 'resize');
+    const timers = [0, 120, 300, 520].map((delay) => window.setTimeout(triggerResize, delay));
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, [sidebarOpen, selectedApartment?.id]);
+
+  useEffect(() => {
+    const element = mapElementRef.current;
+    const map = mapRef.current;
+    if (!element || !map || !window.ResizeObserver) {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      window.naver?.maps.Event.trigger?.(map, 'resize');
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [status]);
+
+  useEffect(() => {
+    if (!selectedApartment) {
+      setCompareSummary([]);
+      return;
+    }
+
+    let cancelled = false;
+    getNearbyFeatures(selectedApartment.id, facilityCategoryKeys, 1000)
+      .then((result) => {
+        if (!cancelled) {
+          setCompareSummary(result.summary);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCompareSummary([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedApartment?.id]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !window.naver?.maps) {
+      return;
+    }
+
+    facilityMarkerRefs.current.forEach(({ marker }) => marker.setMap(null));
+    facilityMarkerRefs.current = displayMarkers.map((item) => {
+      const iconLabel = facilityFilters.find((filter) => filter.key === item.category)?.icon ?? '•';
+      const marker = new window.naver!.maps.Marker({
+        position: new window.naver!.maps.LatLng(item.latitude, item.longitude),
+        map,
+        title: item.name,
+        icon:
+          item.count > 1
+            ? getClusterMarkerIcon(iconLabel, facilityColors[item.category], item.count)
+            : getMarkerIcon(iconLabel, facilityColors[item.category], 'facility'),
+        zIndex: item.count > 1 ? 80 : 40,
+      });
+      window.naver!.maps.Event.addListener(marker, 'click', (event?: { stop?: () => void }) => {
+        event?.stop?.();
+        if (item.count === 1) {
+          setSelectedFacility(item.features[0]);
+          return;
+        }
+
+        setSelectedFacility({
+          ...item.features[0],
+          id: item.id,
+          name: item.name,
+          latitude: item.latitude,
+          longitude: item.longitude,
+          distance_m: null,
+          metadata: {
+            ...item.features[0].metadata,
+            count: item.count,
+          },
+        });
+      });
+      return { marker, item };
+    });
+
+    return () => {
+      facilityMarkerRefs.current.forEach(({ marker }) => marker.setMap(null));
+      facilityMarkerRefs.current = [];
+    };
+  }, [displayMarkers]);
+
+  useEffect(() => {
+    if (!selectedApartment) {
+      return;
+    }
+
+    void refreshFeaturesByBounds(activeCategories);
+  }, [selectedApartment?.id, activeCategories]);
+
+  async function refreshFeaturesByBounds(categories: FacilityCategory[]) {
+    if (categories.length === 0) {
+      featureRequestIdRef.current += 1;
+      setFeatures([]);
+      setSummary([]);
+      setSelectedFacility(null);
+      setDataStatus('idle');
+      return;
+    }
+
+    const bounds = mapRef.current?.getBounds?.() as BoundsLike | undefined;
+    if (!bounds) {
+      return;
+    }
+
+    const sw = bounds.getSW();
+    const ne = bounds.getNE();
+    const boundsKey = [
+      sw.lat().toFixed(4),
+      sw.lng().toFixed(4),
+      ne.lat().toFixed(4),
+      ne.lng().toFixed(4),
+      categories.join(','),
+    ].join(':');
+    if (lastBoundsRequestKeyRef.current === boundsKey) {
+      return;
+    }
+    lastBoundsRequestKeyRef.current = boundsKey;
+
+    const requestId = featureRequestIdRef.current + 1;
+    featureRequestIdRef.current = requestId;
+    setDataStatus('loading');
+
+    try {
+      const result = await getFeaturesInBounds(
+        {
+          swLat: sw.lat(),
+          swLng: sw.lng(),
+          neLat: ne.lat(),
+          neLng: ne.lng(),
+        },
+        categories,
+        mapRef.current?.getZoom?.() ?? currentZoom,
+      );
+      if (featureRequestIdRef.current !== requestId) {
+        return;
+      }
+      setFeatures(result.features);
+      setSummary(result.summary);
+      setDataStatus('idle');
+    } catch {
+      if (featureRequestIdRef.current === requestId) {
+        setDataStatus('error');
+      }
+    }
+  }
+
+  function selectApartment(apartment: ApartmentSummary) {
     setSelectedApartment(apartment);
     setSidebarOpen(false);
     setSelectedFacility(null);
 
     const map = mapRef.current;
     if (window.naver?.maps && map) {
-      const center = new window.naver.maps.LatLng(apartment.lat, apartment.lng);
+      const center = new window.naver.maps.LatLng(apartment.latitude, apartment.longitude);
       map.setCenter?.(center);
-      map.setZoom?.(16);
+      map.setZoom?.(17);
       window.naver.maps.Event.trigger?.(map, 'resize');
 
       if (!apartmentMarkerRef.current) {
@@ -373,33 +660,35 @@ export function NaverMapPreview({
           map,
           title: apartment.name,
           icon: getMarkerIcon('집', facilityColors.home, 'home', waezipHomeMarker),
+          zIndex: 10000,
         });
       } else {
         apartmentMarkerRef.current.setPosition?.(center);
         apartmentMarkerRef.current.setMap(map);
+        apartmentMarkerRef.current.setZIndex?.(10000);
       }
     }
   }
 
-  function selectFromSearch(term: string) {
+  async function selectFromSearch(term: string) {
     const normalized = term.trim();
     if (!normalized) {
       return;
     }
 
-    const matchedApartment = apartmentOptions.find((apartment) => apartment.name.includes(normalized));
-    selectApartment(
-      matchedApartment ?? {
-        name: normalized,
-        address: '검색한 아파트 주소',
-        lat: 37.5714,
-        lng: 126.9768,
-        built: '연혁 확인 필요',
-        radius: '반경 1km',
-      },
-    );
-    setSearchTerm('');
-    setTopSearchOpen(false);
+    setDataStatus('loading');
+    try {
+      const items = await searchApartments(normalized, 20);
+      setApartmentOptions(items);
+      if (items[0]) {
+        selectApartment(items[0]);
+        setSearchTerm('');
+        setTopSearchOpen(false);
+      }
+      setDataStatus('idle');
+    } catch {
+      setDataStatus('error');
+    }
   }
 
   function openSidebar() {
@@ -409,7 +698,9 @@ export function NaverMapPreview({
 
   function changeFilter(nextFilter: FacilityKey) {
     if (nextFilter === 'all') {
-      setActiveFilters([]);
+      setActiveFilters((current) =>
+        current.length === facilityCategoryKeys.length ? [] : [...facilityCategoryKeys],
+      );
     } else {
       setActiveFilters((current) =>
         current.includes(nextFilter)
@@ -423,13 +714,13 @@ export function NaverMapPreview({
   }
 
   function resetFilters() {
-    setActiveFilters([]);
+    setActiveFilters(defaultActiveFilters);
     setAnimatedFilter('all');
     setSelectedFacility(null);
     window.setTimeout(() => setAnimatedFilter(null), 420);
   }
 
-  function selectSuggestion(apartment: Apartment) {
+  function selectSuggestion(apartment: ApartmentSummary) {
     selectApartment(apartment);
     setSearchTerm('');
     setTopSearchOpen(false);
@@ -468,7 +759,7 @@ export function NaverMapPreview({
             {topApartmentSuggestions.length > 0 && (
               <div className="apartment-suggestions" role="listbox">
                 {topApartmentSuggestions.map((apartment) => (
-                  <button key={apartment.name} onMouseDown={(event) => event.preventDefault()} onClick={() => selectSuggestion(apartment)} role="option" type="button">
+                  <button key={apartment.id} onMouseDown={(event) => event.preventDefault()} onClick={() => selectSuggestion(apartment)} role="option" type="button">
                     <span aria-hidden="true">집</span>
                     <b>{apartment.name}</b>
                     <small>{apartment.address}</small>
@@ -510,7 +801,7 @@ export function NaverMapPreview({
             {sidebarApartmentSuggestions.length > 0 && (
               <div className="apartment-suggestions" role="listbox">
                 {sidebarApartmentSuggestions.map((apartment) => (
-                  <button key={apartment.name} onMouseDown={(event) => event.preventDefault()} onClick={() => selectSuggestion(apartment)} role="option" type="button">
+                  <button key={apartment.id} onMouseDown={(event) => event.preventDefault()} onClick={() => selectSuggestion(apartment)} role="option" type="button">
                     <span aria-hidden="true">집</span>
                     <b>{apartment.name}</b>
                     <small>{apartment.address}</small>
@@ -524,7 +815,7 @@ export function NaverMapPreview({
             {sidebarApartmentOptions.map((apartment) => (
               <button
                 className="apartment-option"
-                key={apartment.name}
+                key={apartment.id}
                 onClick={() => selectApartment(apartment)}
                 type="button"
               >
@@ -540,21 +831,25 @@ export function NaverMapPreview({
           <section className="sidebar-compare" aria-label="아파트 비교">
             <h3>아파트 비교</h3>
             <b>{selectedApartment?.name ?? '기준 아파트 미선택'}</b>
+            <small className="compare-radius-note">선택 아파트 1km 이내 기준</small>
             <select
               aria-label="비교 아파트 선택"
               onChange={(event) => setCompareTarget(event.target.value)}
               value={compareTarget}
             >
-              {compareApartments.map((apartment) => (
-                <option key={apartment}>{apartment}</option>
+              <option value="">비교 아파트 선택</option>
+              {compareApartmentOptions.map((apartment) => (
+                <option key={apartment.id} value={apartment.id}>
+                  {apartment.name}
+                </option>
               ))}
             </select>
             <div className="facts">
-              {compareLabels.map((label, index) => (
-                <div className="fact" key={label}>
-                  <small>{label}</small>
-                  <b>{baseValues[index]}</b>
-                  <span>{compareTargetValues[index]}</span>
+              {summaryItems.map((item) => (
+                <div className="fact" key={item.key}>
+                  <small>{item.label}</small>
+                  <b>{item.value}</b>
+                  <span>{compareTarget ? '비교 준비 중' : '1km 이내'}</span>
                 </div>
               ))}
             </div>
@@ -589,9 +884,9 @@ export function NaverMapPreview({
                 <div>
                   <b>무엇을 지도에서 볼까요?</b>
                   <p className="apartment-mini-summary">
-                    <span>어린이시설 8곳</span>
-                    <span>학교 도보 7분</span>
-                    <span>보행신호 4개</span>
+                    <span>어린이시설 {getSummaryCount(summary, 'kids')}곳</span>
+                    <span>학교 {getSummaryCount(summary, 'school')}곳</span>
+                    <span>보행신호 {getSummaryCount(summary, 'signal')}개</span>
                   </p>
                 </div>
                 <button onClick={openSidebar} type="button">🏢 아파트 다시 선택</button>
@@ -600,7 +895,11 @@ export function NaverMapPreview({
                 {facilityFilters.map((filter) => (
                   <button
                     className={[
-                      (filter.key === 'all' ? activeFilters.length === 0 : activeFilters.includes(filter.key))
+                      (
+                        filter.key === 'all'
+                          ? activeFilters.length === facilityCategoryKeys.length
+                          : activeFilters.includes(filter.key)
+                      )
                         ? 'facility-filter facility-filter--active'
                         : 'facility-filter',
                       animatedFilter === filter.key ? 'facility-filter--pop' : '',
@@ -630,9 +929,18 @@ export function NaverMapPreview({
             )}
             {status === 'loading' && <div className="map-message">네이버 지도를 불러오는 중입니다.</div>}
             {status === 'error' && (
-              <div className="map-message">
-                <strong>지도 로드에 실패했습니다.</strong>
-                <span>네이버 콘솔의 Web 서비스 URL과 Client ID를 확인하세요.</span>
+            <div className="map-message">
+              <strong>지도 로드에 실패했습니다.</strong>
+              <span>네이버 콘솔의 Web 서비스 URL과 Client ID를 확인하세요.</span>
+            </div>
+          )}
+            {status === 'ready' && dataStatus === 'loading' && (
+              <div className="map-message map-message--soft">주변 데이터를 불러오는 중입니다.</div>
+            )}
+            {status === 'ready' && dataStatus === 'error' && (
+              <div className="map-message map-message--soft">
+                <strong>주변 데이터 연결을 확인해주세요.</strong>
+                <span>백엔드 서버와 Supabase 연결 상태를 확인하세요.</span>
               </div>
             )}
           </div>
@@ -642,7 +950,7 @@ export function NaverMapPreview({
               {sidebarApartmentOptions.map((apartment) => (
                 <button
                   className="apartment-map-bubble"
-                  key={apartment.name}
+                  key={apartment.id}
                   onClick={() => selectApartment(apartment)}
                   title={apartment.name}
                   type="button"
@@ -664,9 +972,9 @@ export function NaverMapPreview({
 
           {selectedFacility && (
             <aside className="map-place-card" aria-label="선택한 시설 정보">
-              <small>{facilityFilters.find((filter) => filter.key === selectedFacility.key)?.label}</small>
-              <b>{selectedFacility.label}</b>
-              <span>{selectedFacility.detail}</span>
+              <small>{getFeatureLabel(selectedFacility.category)}</small>
+              <b>{selectedFacility.name}</b>
+              <span>{formatFeatureDetail(selectedFacility)}</span>
             </aside>
           )}
         </div>

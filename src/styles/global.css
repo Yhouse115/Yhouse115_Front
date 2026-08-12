@@ -788,6 +788,16 @@ a {
   border-radius: 15px;
   background: #ffffff;
   box-shadow: 0 16px 38px rgba(15, 31, 61, 0.18);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.search-slide .apartment-suggestions {
+  max-height: 318px;
+}
+
+.sidebar-search .apartment-suggestions {
+  max-height: 193px;
 }
 
 .apartment-suggestions button {
@@ -873,6 +883,14 @@ a {
   display: block;
   color: #347a49;
   font-size: 0.95rem;
+}
+
+.compare-radius-note {
+  display: block;
+  margin-top: 5px;
+  color: #77757a;
+  font-size: 0.76rem;
+  font-weight: 750;
 }
 
 .sidebar-compare select {
@@ -963,13 +981,21 @@ a {
   position: relative;
   min-width: 0;
   height: 100%;
+  overflow: hidden;
 }
 
 .family-naver-map {
   position: absolute;
   inset: 0;
-  min-height: 100%;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
   background: #edf1f1;
+}
+
+.family-naver-map > div:first-child {
+  width: 100% !important;
+  height: 100% !important;
 }
 
 .sidebar-open-button {
@@ -1126,6 +1152,44 @@ a {
   font-size: 0.76rem;
   line-height: 1;
   transform: rotate(45deg);
+}
+
+.map-cluster-pin {
+  position: relative;
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 3px solid #ffffff;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--pin-color) 88%, #ffffff);
+  box-shadow: 0 8px 18px rgba(12, 22, 34, 0.24);
+  color: #ffffff;
+}
+
+.map-cluster-pin b {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.map-cluster-pin em {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  display: grid;
+  min-width: 24px;
+  height: 24px;
+  place-items: center;
+  padding: 0 6px;
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  background: #111827;
+  color: #ffffff;
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 900;
+  line-height: 1;
+  box-shadow: 0 5px 12px rgba(12, 22, 34, 0.22);
 }
 
 .map-pin--home {
