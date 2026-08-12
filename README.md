@@ -22,6 +22,8 @@ VITE_NAVER_MAPS_SOFT_STYLE_ID=
 VITE_NAVER_MAPS_NO_TRANSIT_STYLE_ID=
 ```
 
+백엔드와 프론트 모두 같은 `VITE_NAVER_MAPS_*` 키를 사용합니다. 팀에서 env 키를 공유할 때는 위 변수명 그대로 맞추면 됩니다.
+
 네이버 클라우드 콘솔의 Maps Application 설정에서 `Dynamic Map`이 활성화되어 있어야 하고, Web 서비스 URL에는 로컬 확인용으로 `http://localhost:3000`과 `http://127.0.0.1:3000`을 등록하세요.
 
 기본 지도 템플릿은 네이버 기본 지도입니다. 운영 기본값은 이 지도 위에 올리는 지하철역/기준 위치 표시와 색상 설정입니다. 별도의 커스텀 지도 색상이 필요할 때만 Naver Maps Style Editor에서 발행한 Metadata ID를 `VITE_NAVER_MAPS_DEFAULT_STYLE_ID`, `VITE_NAVER_MAPS_TRANSIT_STYLE_ID`, `VITE_NAVER_MAPS_SOFT_STYLE_ID`에 설정하세요.
