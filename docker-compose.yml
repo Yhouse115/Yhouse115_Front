@@ -10,7 +10,7 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - whyhouse-postgres-data:/var/lib/postgresql/data
-      - ${BACKEND_CONTEXT:-../WhyHouse_Back}/docker/postgres/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
+      - ../Yhouse115_Back/docker/postgres/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-whyhouse} -d ${POSTGRES_DB:-whyhouse}"]
       interval: 5s
@@ -21,10 +21,10 @@ services:
 
   backend:
     build:
-      context: ${BACKEND_CONTEXT:-../WhyHouse_Back}
+      context: ../Yhouse115_Back
     container_name: whyhouse-backend
     env_file:
-      - path: ${BACKEND_CONTEXT:-../WhyHouse_Back}/.env
+      - path: ../Yhouse115_Back/.env
         required: false
     environment:
       APP_ENV: ${APP_ENV:-local}
@@ -39,7 +39,7 @@ services:
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:
-      - ${BACKEND_CONTEXT:-../WhyHouse_Back}/app:/app/app:ro
+      - ../Yhouse115_Back/app:/app/app:ro
     depends_on:
       database:
         condition: service_healthy
