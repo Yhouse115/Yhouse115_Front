@@ -1,7 +1,8 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 
 import { HealthCheck } from './components/HealthCheck';
 import { NaverMapPreview } from './components/NaverMapPreview';
+import { WhyHouseIntro } from './components/WhyHouseIntro';
 import investmentImage from './assets/landing-investment-card.png';
 import familyImage from './assets/landing-family-card.png';
 import waezipLogo from './assets/waezip-logo.png';
@@ -134,6 +135,22 @@ function FamilyMapPage() {
 
 export default function App() {
   const [path, setPath] = useState(window.location.pathname);
+  const [showIntro, setShowIntro] = useState(() => {
+    if (import.meta.env.MODE === 'test' || window.location.pathname !== routes.home) return false;
+
+    try {
+      if (new URLSearchParams(window.location.search).get('intro') === '1') return true;
+      if (window.sessionStorage.getItem('whyhouse:intro-played') === 'true') return false;
+      window.sessionStorage.setItem('whyhouse:intro-played', 'true');
+      return true;
+    } catch {
+      return true;
+    }
+  });
+
+  const completeIntro = useCallback(() => {
+    setShowIntro(false);
+  }, []);
 
   useEffect(() => {
     const handleRouteChange = () => setPath(window.location.pathname);
@@ -148,6 +165,17 @@ export default function App() {
 
   if (path === routes.familyMap) {
     return <FamilyMapPage />;
+  }
+
+  if (path === routes.home && showIntro) {
+    return (
+      <div className="intro-stack">
+        <div className="intro-premounted-page" aria-hidden="true">
+          <LandingPage />
+        </div>
+        <WhyHouseIntro onComplete={completeIntro} />
+      </div>
+    );
   }
 
   return (
