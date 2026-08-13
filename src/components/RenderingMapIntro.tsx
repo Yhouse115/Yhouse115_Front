@@ -1,5 +1,5 @@
 import { createTimeline } from 'animejs';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 
 import neighborhoodBase from '../assets/intro-neighborhood-base.png';
 import neighborhoodScene from '../assets/intro-neighborhood-scene.png';
@@ -16,11 +16,19 @@ type RenderingMapIntroProps = {
 };
 
 type PoseName = 'fall' | 'land' | 'confused' | 'map' | 'point';
+type PoseConfig = {
+  start: number;
+  end: number;
+  anchorX: number;
+  anchorY: number;
+};
 
 const INTRO_DURATION_MS = 6600;
 const TRANSITION_START_MS = 5900;
+const DOG_ANIMATION_STOP_MS = 4900;
 const MAP_TRANSITION_DURATION_MS = 700;
 const SOURCE_FRAME_COUNT = 34;
+const POSE_CROSSFADE_MS = 54;
 
 const sprites: Record<PoseName, string> = {
   fall: spriteFall,
@@ -28,6 +36,14 @@ const sprites: Record<PoseName, string> = {
   confused: spriteConfused,
   map: spriteMap,
   point: spritePoint,
+};
+
+const poseTimeline: Record<PoseName, PoseConfig> = {
+  fall: { start: 0, end: 1100, anchorX: 50, anchorY: 86 },
+  land: { start: 1100, end: 2000, anchorX: 50, anchorY: 87 },
+  confused: { start: 2000, end: 2800, anchorX: 50, anchorY: 88 },
+  map: { start: 2800, end: 4900, anchorX: 52, anchorY: 89 },
+  point: { start: 4900, end: TRANSITION_START_MS, anchorX: 50, anchorY: 88 },
 };
 
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
@@ -41,49 +57,34 @@ const segment = (time: number, from: number, to: number, easing: (value: number)
   easing(clamp01((time - from) / (to - from)))
 );
 
-function getPose(time: number): PoseName {
-  if (time < 1100) return 'fall';
-  if (time < 2000) return 'land';
-  if (time < 2800) return 'confused';
-  if (time < 4900) return 'map';
-  return 'point';
-}
-
 function getPoseOpacity(time: number, pose: PoseName) {
-  const activePose = getPose(time);
-  if (activePose === pose) return 1;
-
-  const fadeWindows: Partial<Record<PoseName, [number, number]>> = {
-    fall: [1040, 1160],
-    land: [1920, 2050],
-    confused: [2700, 2860],
-    map: [4780, 4940],
-  };
-  const window = fadeWindows[pose];
-  if (!window) return 0;
-  return 1 - segment(time, window[0], window[1], easeInOutCubic);
+  const { start, end } = poseTimeline[pose];
+  if (time < start - POSE_CROSSFADE_MS || time > end + POSE_CROSSFADE_MS) return 0;
+  const fadeIn = segment(time, start - POSE_CROSSFADE_MS, start, easeInOutCubic);
+  const fadeOut = 1 - segment(time, end, end + POSE_CROSSFADE_MS, easeInOutCubic);
+  return Math.min(fadeIn, fadeOut);
 }
 
 function getDogStyle(time: number) {
-  const fall = segment(time, 0, 1100, easeInCubic);
-  const landing = segment(time, 1100, 2000, easeOutCubic);
-  const recover = segment(time, 2000, 2800, easeInOutCubic);
-  const openMap = segment(time, 2800, 4000, easeInOutCubic);
-  const focus = segment(time, 4000, 4900, easeInOutCubic);
-  const zoom = segment(time, 4900, 5900, easeInOutCubic);
+  const poseTime = Math.min(time, DOG_ANIMATION_STOP_MS);
+  const fall = segment(poseTime, 0, 1100, easeInCubic);
+  const landing = segment(poseTime, 1100, 2000, easeOutCubic);
+  const recover = segment(poseTime, 2000, 2800, easeInOutCubic);
+  const openMap = segment(poseTime, 2800, 4000, easeInOutCubic);
+  const focus = segment(poseTime, 4000, DOG_ANIMATION_STOP_MS, easeInOutCubic);
   const impact = Math.sin(landing * Math.PI * 2.8) * (1 - landing);
-  const idle = Math.sin(time / 180) * 2;
+  const idle = poseTime < DOG_ANIMATION_STOP_MS ? Math.sin(poseTime / 180) * 2 : 0;
 
-  const y = time < 1100
+  const y = poseTime < 1100
     ? mix(-52, 20, fall)
-    : mix(20, 12, landing) + impact * -18 + recover * -7 + openMap * 4 + zoom * 44;
-  const x = time < 1100
+    : mix(20, 12, landing) + impact * -18 + recover * -7 + openMap * 4;
+  const x = poseTime < 1100
     ? Math.sin(fall * Math.PI * 2) * 10
-    : mix(0, -8, recover) + mix(0, -16, openMap) + zoom * -108;
-  const scale = time < 1100
+    : mix(0, -8, recover) + mix(0, -16, openMap);
+  const scale = poseTime < 1100
     ? mix(0.78, 1.02, fall)
-    : 1 + Math.sin(landing * Math.PI * 2.5) * 0.035 * (1 - landing) - zoom * 0.18;
-  const rotate = time < 1100
+    : 1 + Math.sin(landing * Math.PI * 2.5) * 0.035 * (1 - landing);
+  const rotate = poseTime < 1100
     ? mix(-7, 3, fall) + Math.sin(fall * Math.PI * 3) * 3
     : impact * -6 + recover * -2 + focus * 1.5;
 
@@ -198,9 +199,9 @@ export function RenderingMapIntro({ children }: RenderingMapIntroProps) {
     const fall = segment(time, 0, 1100, easeInCubic);
     const land = segment(time, 1100, 2000, easeOutCubic);
     const mapOpen = segment(time, 2800, 4000, easeInOutCubic);
-    const viewMap = segment(time, 4000, 4900, easeInOutCubic);
-    const zoom = segment(time, 4900, 5900, easeInOutCubic);
-    const cameraScale = mix(1, 2.48, zoom);
+    const mapSettle = segment(time, 4000, DOG_ANIMATION_STOP_MS, easeInOutCubic);
+    const zoom = segment(time, DOG_ANIMATION_STOP_MS, TRANSITION_START_MS, easeInOutCubic);
+    const cameraScale = mix(1, 2.6, zoom);
     const cameraX = mix(0, -20, zoom);
     const cameraY = mix(0, -24, zoom);
     const groundPulse = Math.sin(land * Math.PI * 3) * (1 - land);
@@ -222,7 +223,7 @@ export function RenderingMapIntro({ children }: RenderingMapIntroProps) {
       },
       paperStyle: {
         opacity: mapOpen,
-        transform: `translate3d(${mix(18, 0, mapOpen)}vw, ${mix(16, 6, mapOpen) + Math.sin(viewMap * Math.PI * 2) * 0.6}vh, 0) rotate(${mix(-12, -2, mapOpen)}deg) scale(${mix(0.54, 1.04, mapOpen) + zoom * 0.72})`,
+        transform: `translate3d(${mix(18, 0, mapOpen)}vw, ${mix(16, 6, mapOpen) + Math.sin(mapSettle * Math.PI * 2) * 0.6}vh, 0) rotate(${mix(-12, -2, mapOpen)}deg) scale(${mix(0.54, 1.04, mapOpen)})`,
       },
       mapDetailStyle: {
         opacity: clamp01((zoom - 0.18) / 0.68),
@@ -262,7 +263,11 @@ export function RenderingMapIntro({ children }: RenderingMapIntroProps) {
                   className={`rendering-dog-pose rendering-dog-pose--${pose}`}
                   key={pose}
                   src={sprites[pose]}
-                  style={{ opacity: getPoseOpacity(visualState.time, pose) }}
+                  style={{
+                    '--dog-anchor-x': `${poseTimeline[pose].anchorX}%`,
+                    '--dog-anchor-y': `${poseTimeline[pose].anchorY}%`,
+                    opacity: getPoseOpacity(visualState.time, pose),
+                  } as CSSProperties}
                 />
               ))}
             </div>

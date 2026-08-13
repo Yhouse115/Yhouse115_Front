@@ -256,35 +256,20 @@ a {
   z-index: 6;
   width: min(28vw, 330px);
   aspect-ratio: 0.77;
-  transform-origin: 50% 82%;
+  transform-origin: 50% 100%;
   will-change: transform;
 }
 
 .rendering-dog-pose {
-  inset: 0;
+  top: 100%;
+  left: 50%;
   width: 100%;
   height: 100%;
   object-fit: contain;
   object-position: center bottom;
-  transition: opacity 90ms ease;
+  transform: translate(calc(-1 * var(--dog-anchor-x, 50%)), calc(-1 * var(--dog-anchor-y, 88%)));
+  transition: opacity 54ms ease;
   will-change: opacity;
-}
-
-.rendering-dog-pose--fall {
-  transform: translateY(-3%) scale(1.06);
-}
-
-.rendering-dog-pose--land,
-.rendering-dog-pose--confused {
-  transform: translateY(7%) scale(1.08);
-}
-
-.rendering-dog-pose--map {
-  transform: translateY(9%) scale(1.1);
-}
-
-.rendering-dog-pose--point {
-  transform: translateY(3%) scale(1.05);
 }
 
 .rendering-intro-skip {
