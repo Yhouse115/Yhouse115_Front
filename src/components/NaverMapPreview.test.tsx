@@ -31,6 +31,10 @@ function installNaverMapsMock() {
     setZIndex = vi.fn();
   }
 
+  class PolylineMock {
+    setMap = vi.fn();
+  }
+
   window.naver = {
     maps: {
       LatLng: class {},
@@ -38,6 +42,7 @@ function installNaverMapsMock() {
       Position: { BOTTOM_RIGHT: 'bottom-right' },
       Map: MapMock,
       Marker: MarkerMock,
+      Polyline: PolylineMock,
       Event: {
         addListener: vi.fn((target, eventName, listener) => {
           if (target instanceof MarkerMock && eventName === 'click') {
