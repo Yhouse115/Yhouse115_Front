@@ -66,6 +66,10 @@ export type WalkingRoute = {
   walkTimeMinutes: number;
   routeMethod: string;
   calculatedAt: string;
+  safetyMatchThresholdMeters?: number | null;
+  crosswalkCount?: number | null;
+  pedestrianSignalCount?: number | null;
+  cctvLocationCount?: number | null;
 };
 
 export class ApiRequestError extends Error {
@@ -187,6 +191,10 @@ function mapWalkingRoute(response: WalkingRoute): WalkingRoute {
     || !response.routeCoordinates.every(isRouteCoordinate)
     || !Number.isFinite(response.walkDistanceMeters)
     || !Number.isFinite(response.walkTimeMinutes)
+    || (response.safetyMatchThresholdMeters != null && !Number.isFinite(response.safetyMatchThresholdMeters))
+    || (response.crosswalkCount != null && !Number.isFinite(response.crosswalkCount))
+    || (response.pedestrianSignalCount != null && !Number.isFinite(response.pedestrianSignalCount))
+    || (response.cctvLocationCount != null && !Number.isFinite(response.cctvLocationCount))
   ) {
     throw new Error('Walking route response is invalid.');
   }
@@ -194,6 +202,10 @@ function mapWalkingRoute(response: WalkingRoute): WalkingRoute {
   return {
     ...response,
     routeCoordinates: response.routeCoordinates.map(([longitude, latitude]) => [longitude, latitude]),
+    safetyMatchThresholdMeters: response.safetyMatchThresholdMeters ?? null,
+    crosswalkCount: response.crosswalkCount ?? null,
+    pedestrianSignalCount: response.pedestrianSignalCount ?? null,
+    cctvLocationCount: response.cctvLocationCount ?? null,
   };
 }
 

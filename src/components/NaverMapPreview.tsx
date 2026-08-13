@@ -93,8 +93,8 @@ const conditionFacilityCategoryKeys: FacilityCategory[] = ['school', 'kids', 'pa
 const defaultActiveFilters: ActiveFacilityKey[] = ['kids', 'school'];
 const nearbyRadiusM = 1000;
 const conditionParkRadiusM = 3000;
-// Crosswalk source points and the pedestrian-network center line can be offset
-// by one road segment, so use the same close-by threshold for display and counts.
+// Used for pre-selection estimates. A selected stored route provides its own
+// tighter, precomputed safety-match threshold.
 const routeSafetyProximityMeters = 100;
 function getSavedConditionState() {
   try {
@@ -577,17 +577,21 @@ export function NaverMapPreview({
     }
 
     const route = selectedWalkingRoute.routeCoordinates.map(([longitude, latitude]) => ({ latitude, longitude }));
+    const safetyThresholdMeters = selectedWalkingRoute.safetyMatchThresholdMeters ?? routeSafetyProximityMeters;
     return conditionFeatures.filter((feature) =>
       (feature.category === 'crosswalk' || feature.category === 'signal')
-      && distanceToRoute(feature, route) <= routeSafetyProximityMeters,
+      && distanceToRoute(feature, route) <= safetyThresholdMeters,
     );
   }, [conditionFeatures, selectedWalkingRoute]);
   const selectedDestinationCrosswalks = selectedWalkingRoute
-    ? selectedRouteSafetyFeatures.filter((feature) => feature.category === 'crosswalk').length
+    ? selectedWalkingRoute.crosswalkCount ?? selectedRouteSafetyFeatures.filter((feature) => feature.category === 'crosswalk').length
     : selectedDestination?.crosswalks;
   const selectedDestinationSignals = selectedWalkingRoute
-    ? selectedRouteSafetyFeatures.filter((feature) => feature.category === 'signal').length
+    ? selectedWalkingRoute.pedestrianSignalCount ?? selectedRouteSafetyFeatures.filter((feature) => feature.category === 'signal').length
     : selectedDestination?.signals;
+  const selectedDestinationCctv = selectedWalkingRoute
+    ? selectedWalkingRoute.cctvLocationCount ?? selectedDestination?.cctv
+    : selectedDestination?.cctv;
   const selectedRouteSafetyMessage = selectedWalkingRoute
     && walkingRouteStatus === 'ready'
     && selectedRouteSafetyFeatures.length === 0
@@ -1356,14 +1360,14 @@ export function NaverMapPreview({
               <aside className="condition-apartment-card">
                 <small>선택 단지</small><h2>{selectedApartment.name}</h2><p>{selectedApartment.address}</p>
                 <dl>
-                  {selectedDestination ? <><div><dt>통학 목적지</dt><dd>{selectedDestination.name}</dd></div><div><dt>도보 시간</dt><dd>{selectedDestinationMinutes}분</dd></div><div><dt>횡단보도</dt><dd>{selectedDestinationCrosswalks}개</dd></div><div><dt>보행신호</dt><dd>{selectedDestinationSignals}개</dd></div><div><dt>CCTV</dt><dd>{selectedDestination.cctv}개</dd></div></> : <><div><dt>현재 상태</dt><dd>목적지 선택 전</dd></div><div><dt>분석 기준</dt><dd>실제 시설 좌표·큰길 경로</dd></div></>}
+                  {selectedDestination ? <><div><dt>통학 목적지</dt><dd>{selectedDestination.name}</dd></div><div><dt>도보 시간</dt><dd>{selectedDestinationMinutes}분</dd></div><div><dt>횡단보도</dt><dd>{selectedDestinationCrosswalks}개</dd></div><div><dt>보행신호</dt><dd>{selectedDestinationSignals}개</dd></div><div><dt>CCTV</dt><dd>{selectedDestinationCctv}개</dd></div></> : <><div><dt>현재 상태</dt><dd>목적지 선택 전</dd></div><div><dt>분석 기준</dt><dd>실제 시설 좌표·큰길 경로</dd></div></>}
                 </dl>
                 <button onClick={onOpenInvestment} type="button">단지 상세 보기</button>
               </aside>
 
               <aside className="condition-control-card">
                 <div className="condition-control-title"><div><small>{conditionStep === 'route' ? '선택한 경로' : '목적지 탐색'}</small><h2>{conditionStep === 'route' ? '조건 분석' : '어디로 갈까요?'}</h2></div><button onClick={() => setDestinationMenuOpen((open) => !open)} type="button">✨</button></div>
-                {conditionStep === 'route' && selectedDestination ? <div className="condition-metrics"><div><span>🚶</span><small>도보 시간</small><b>{selectedDestinationMinutes}분</b></div><div><span>🚸</span><small>횡단보도</small><b>{selectedDestinationCrosswalks}개</b></div><div><span>🚦</span><small>보행신호</small><b>{selectedDestinationSignals}개</b></div><div><span>📹</span><small>CCTV</small><b>{selectedDestination.cctv}개</b></div>{supportsStoredWalkingRoute(selectedDestination.category) && walkingRouteMessage && <p className="condition-route-status" role="status">{walkingRouteMessage}</p>}{selectedRouteSafetyMessage && <p className="condition-route-status" role="status">{selectedRouteSafetyMessage}</p>}<button onClick={resetDestination} type="button">다른 목적지 선택</button></div> : <div className="condition-categories">{(Object.entries(conditionCategoryMeta) as Array<[ConditionCategory, { label: string; icon: string }]>).map(([key, meta]) => <button className={visibleConditionCategories.includes(key) ? 'is-active' : ''} key={key} onClick={() => toggleConditionCategory(key)} type="button"><span>{meta.icon}</span>{meta.label}<small>{visibleConditionCategories.includes(key) ? '표시 중' : '선택'}</small></button>)}</div>}
+                {conditionStep === 'route' && selectedDestination ? <div className="condition-metrics"><div><span>🚶</span><small>도보 시간</small><b>{selectedDestinationMinutes}분</b></div><div><span>🚸</span><small>횡단보도</small><b>{selectedDestinationCrosswalks}개</b></div><div><span>🚦</span><small>보행신호</small><b>{selectedDestinationSignals}개</b></div><div><span>📹</span><small>CCTV</small><b>{selectedDestinationCctv}개</b></div>{supportsStoredWalkingRoute(selectedDestination.category) && walkingRouteMessage && <p className="condition-route-status" role="status">{walkingRouteMessage}</p>}{selectedRouteSafetyMessage && <p className="condition-route-status" role="status">{selectedRouteSafetyMessage}</p>}<button onClick={resetDestination} type="button">다른 목적지 선택</button></div> : <div className="condition-categories">{(Object.entries(conditionCategoryMeta) as Array<[ConditionCategory, { label: string; icon: string }]>).map(([key, meta]) => <button className={visibleConditionCategories.includes(key) ? 'is-active' : ''} key={key} onClick={() => toggleConditionCategory(key)} type="button"><span>{meta.icon}</span>{meta.label}<small>{visibleConditionCategories.includes(key) ? '표시 중' : '선택'}</small></button>)}</div>}
                 {destinationMenuOpen && <div className="destination-menu">{conditionCandidates.map((item) => <button key={item.id} onClick={() => selectDestination(item)} type="button"><span>{conditionCategoryMeta[item.category].icon} {item.name}</span><small>도보 {item.minutes}분 · {item.distance}m</small></button>)}</div>}
               </aside>
               {conditionStep === 'select' && conditionCandidates.length === 0 && <div className="condition-empty">주변 학교·공원·어린이집·병원 정보를 불러오는 중입니다.</div>}

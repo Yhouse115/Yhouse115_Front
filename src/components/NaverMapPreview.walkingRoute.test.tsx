@@ -48,6 +48,10 @@ describe('NaverMapPreview walking route', () => {
       walkTimeMinutes: 12,
       routeMethod: 'oa-21208-dijkstra',
       calculatedAt: '2026-08-13T00:00:00Z',
+      safetyMatchThresholdMeters: 20,
+      crosswalkCount: 4,
+      pedestrianSignalCount: 1,
+      cctvLocationCount: 8,
     });
   });
 

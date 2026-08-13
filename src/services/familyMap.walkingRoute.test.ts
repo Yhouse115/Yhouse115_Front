@@ -5,7 +5,7 @@ describe('getWalkingRoute', () => {
     vi.unstubAllGlobals();
   });
 
-  it('maps the precomputed walking-route response', async () => {
+  it('maps stored twenty-meter safety counts with the walking route', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -17,6 +17,10 @@ describe('getWalkingRoute', () => {
         walkTimeMinutes: 12,
         routeMethod: 'oa-21208-dijkstra',
         calculatedAt: '2026-08-13T00:00:00Z',
+        safetyMatchThresholdMeters: 20,
+        crosswalkCount: 8,
+        pedestrianSignalCount: 2,
+        cctvLocationCount: 11,
       }),
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -30,6 +34,10 @@ describe('getWalkingRoute', () => {
       walkTimeMinutes: 12,
       routeMethod: 'oa-21208-dijkstra',
       calculatedAt: '2026-08-13T00:00:00Z',
+      safetyMatchThresholdMeters: 20,
+      crosswalkCount: 8,
+      pedestrianSignalCount: 2,
+      cctvLocationCount: 11,
     });
     expect(fetchMock).toHaveBeenCalledWith(
       'http://localhost:8000/api/v1/complexes/complex-1/features/school-1/walking-route',
