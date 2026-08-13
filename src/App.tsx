@@ -35,10 +35,9 @@ function LandingPage() {
         <section className="landing-choice" aria-label="WhyHouse entry routes">
           <div className="landing-intro">
             <span className="eyebrow">우리 집을 이해하는 새로운 방식</span>
-            <h1>
-              어떤 시선으로
-              <br />
-              집을 볼까요?
+            <h1 className="hero-title">
+              <span className="line">어떤 시선으로</span>
+              <span className="line">집을 볼까요?</span>
             </h1>
             <p>
               복잡한 점수 대신, 지도와 기록으로 직접 판단할 수 있게 도와드려요.
