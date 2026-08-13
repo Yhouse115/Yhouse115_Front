@@ -1,15 +1,7 @@
 @font-face {
-  font-family: "RiaSans";
-  src: url("../assets/fonts/RiaSans-Regular.ttf") format("truetype");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "RiaSans";
-  src: url("../assets/fonts/RiaSans-Bold.ttf") format("truetype");
-  font-weight: 700;
+  font-family: "SUIT";
+  src: url("../assets/fonts/SUIT-SemiBold.ttf") format("truetype");
+  font-weight: 600;
   font-style: normal;
   font-display: swap;
 }
@@ -549,9 +541,9 @@ a {
 }
 
 .login-button {
-  font-family: "RiaSans", Inter, ui-sans-serif, system-ui, sans-serif;
+  font-family: "SUIT", Inter, ui-sans-serif, system-ui, sans-serif;
   font-size: 1rem;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.02em;
 }
 
