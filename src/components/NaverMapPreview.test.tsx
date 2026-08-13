@@ -81,6 +81,10 @@ describe('NaverMapPreview', () => {
   it('loads only the selected apartment nearby facilities within 1km', async () => {
     render(<NaverMapPreview />);
 
+    await waitFor(() => {
+      expect(searchApartments).toHaveBeenCalledWith('', 1000);
+    });
+
     fireEvent.click(await screen.findByRole('button', { name: /Test Apartment/ }));
 
     await waitFor(() => {
