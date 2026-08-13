@@ -75,6 +75,14 @@ type DisplayMarker = {
   features: MapFeature[];
 };
 type ActiveMapFeature = MapFeature & { category: ActiveFacilityKey };
+type ApartmentDisplayMarker = {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  count: number;
+  apartments: ApartmentSummary[];
+};
 
 const facilityCategoryKeys: ActiveFacilityKey[] = ['kids', 'school', 'crosswalk', 'signal', 'cctv', 'risk'];
 const conditionFacilityCategoryKeys: FacilityCategory[] = ['school', 'kids', 'park', 'hospital', 'crosswalk', 'signal', 'cctv'];
@@ -255,15 +263,19 @@ function getBubbleApartmentName(name: string) {
   return Array.from(name.replace(/\s+/g, '')).slice(0, 8).join('');
 }
 
-function getApartmentMarkerIcon(apartment: ApartmentSummary) {
+function getApartmentMarkerIcon(marker: ApartmentDisplayMarker) {
+  if (marker.count > 1) {
+    return getClusterMarkerIcon(marker.count);
+  }
+
+  const apartment = marker.apartments[0];
   return {
     content: `
-      <button class="apartment-map-marker" type="button" aria-label="${escapeHtml(apartment.name)} 선택">
+      <button class="apartment-map-pin" type="button" aria-label="${escapeHtml(apartment.name)} 선택">
         <span aria-hidden="true">🏢</span>
-        <b>${escapeHtml(getBubbleApartmentName(apartment.name))}</b>
       </button>
     `,
-    anchor: window.naver ? new window.naver.maps.Point(64, 22) : undefined,
+    anchor: window.naver ? new window.naver.maps.Point(21, 44) : undefined,
   };
 }
 
@@ -366,6 +378,77 @@ function mergeClusterMarkersByOverlap(markers: DisplayMarker[], zoom: number) {
   }
 
   return merged;
+}
+
+function mergeApartmentMarkersByOverlap(markers: ApartmentDisplayMarker[], zoom: number) {
+  const merged: ApartmentDisplayMarker[] = [];
+
+  for (const marker of markers) {
+    const markerPixel = projectMarkerToPixel(marker.latitude, marker.longitude, zoom);
+    const targetIndex = merged.findIndex((candidate) => {
+      const candidatePixel = projectMarkerToPixel(candidate.latitude, candidate.longitude, zoom);
+      const distance = Math.hypot(markerPixel.x - candidatePixel.x, markerPixel.y - candidatePixel.y);
+      return distance <= clusterMergeDistancePx;
+    });
+
+    if (targetIndex === -1) {
+      merged.push(marker);
+      continue;
+    }
+
+    const target = merged[targetIndex];
+    const apartments = [...target.apartments, ...marker.apartments];
+    const count = target.count + marker.count;
+    merged[targetIndex] = {
+      id: `${target.id}:${marker.id}`,
+      name: `${count}개 단지`,
+      latitude: (target.latitude * target.count + marker.latitude * marker.count) / count,
+      longitude: (target.longitude * target.count + marker.longitude * marker.count) / count,
+      count,
+      apartments,
+    };
+  }
+
+  return merged;
+}
+
+function getApartmentDisplayMarkers(apartments: ApartmentSummary[], zoom: number): ApartmentDisplayMarker[] {
+  const gridMeters = getClusterGridMeters(zoom);
+  if (gridMeters === 0) {
+    return apartments.map((apartment) => ({
+      id: apartment.id,
+      name: apartment.name,
+      latitude: apartment.latitude,
+      longitude: apartment.longitude,
+      count: 1,
+      apartments: [apartment],
+    }));
+  }
+
+  const buckets = new Map<string, ApartmentSummary[]>();
+  for (const apartment of apartments) {
+    const latGrid = gridMeters / 111320;
+    const lngGrid = gridMeters / (111320 * Math.cos((apartment.latitude * Math.PI) / 180));
+    const latKey = Math.round(apartment.latitude / latGrid);
+    const lngKey = Math.round(apartment.longitude / lngGrid);
+    const key = `${latKey}:${lngKey}`;
+    buckets.set(key, [...(buckets.get(key) ?? []), apartment]);
+  }
+
+  const markers = Array.from(buckets.entries()).map(([key, bucket]) => {
+    const latitude = bucket.reduce((sum, apartment) => sum + apartment.latitude, 0) / bucket.length;
+    const longitude = bucket.reduce((sum, apartment) => sum + apartment.longitude, 0) / bucket.length;
+    return {
+      id: key,
+      name: bucket.length > 1 ? `${bucket.length}개 단지` : bucket[0].name,
+      latitude,
+      longitude,
+      count: bucket.length,
+      apartments: bucket,
+    };
+  });
+
+  return mergeApartmentMarkersByOverlap(markers, zoom);
 }
 
 function getDisplayMarkers(features: MapFeature[], zoom: number): DisplayMarker[] {
@@ -487,6 +570,10 @@ export function NaverMapPreview({
   const compareApartmentOptions = safeApartmentOptions.filter((apartment) => apartment.id !== selectedApartment?.id).slice(0, 5);
   const summaryItems = useMemo(() => getFeatureSummaryItems(compareSummary), [compareSummary]);
   const displayMarkers = useMemo(() => getDisplayMarkers(features, currentZoom), [features, currentZoom]);
+  const apartmentDisplayMarkers = useMemo(
+    () => getApartmentDisplayMarkers(apartmentOptions, currentZoom),
+    [apartmentOptions, currentZoom],
+  );
   const conditionCandidates = useMemo(() => {
     if (!selectedApartment) return [];
     const candidates = conditionFeatures.filter((feature) =>
@@ -632,15 +719,23 @@ export function NaverMapPreview({
       return;
     }
 
-    apartmentOptionMarkerRefs.current = apartmentOptions.map((apartment) => {
+    apartmentOptionMarkerRefs.current = apartmentDisplayMarkers.map((item) => {
       const marker = new window.naver!.maps.Marker({
-        position: new window.naver!.maps.LatLng(apartment.latitude, apartment.longitude),
+        position: new window.naver!.maps.LatLng(item.latitude, item.longitude),
         map,
-        title: apartment.name,
-        icon: getApartmentMarkerIcon(apartment),
-        zIndex: 80,
+        title: item.name,
+        icon: getApartmentMarkerIcon(item),
+        zIndex: item.count > 1 ? 85 : 80,
       });
-      window.naver!.maps.Event.addListener(marker, 'click', () => selectApartment(apartment));
+      window.naver!.maps.Event.addListener(marker, 'click', () => {
+        if (item.count === 1) {
+          selectApartment(item.apartments[0]);
+          return;
+        }
+
+        map.setCenter?.(new window.naver!.maps.LatLng(item.latitude, item.longitude));
+        map.setZoom?.(Math.min((map.getZoom?.() ?? currentZoom) + 1, 19));
+      });
       return marker;
     });
 
@@ -648,7 +743,7 @@ export function NaverMapPreview({
       apartmentOptionMarkerRefs.current.forEach((marker) => marker.setMap(null));
       apartmentOptionMarkerRefs.current = [];
     };
-  }, [apartmentOptions, selectedApartment, status]);
+  }, [apartmentDisplayMarkers, currentZoom, selectedApartment, status]);
 
   useEffect(() => {
     const map = mapRef.current;

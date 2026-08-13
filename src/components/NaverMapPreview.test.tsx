@@ -106,14 +106,14 @@ describe('NaverMapPreview', () => {
   });
 
   it('zooms in when an apartment is selected and restores the zoom when its marker is clicked again', async () => {
-    render(<NaverMapPreview />);
+    renderMap();
 
     fireEvent.click(await screen.findByRole('button', { name: /Test Apartment/ }));
     expect(screen.getByText('현재 기준점')).toBeInTheDocument();
     expect(mapSetZoom).toHaveBeenLastCalledWith(15);
 
     act(() => {
-      markerClickListeners.at(-1)?.({ stop: vi.fn() });
+      markerClickListeners[markerClickListeners.length - 1]?.({ stop: vi.fn() });
     });
 
     await waitFor(() => {
