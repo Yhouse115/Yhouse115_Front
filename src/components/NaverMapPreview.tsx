@@ -21,7 +21,7 @@ type ConditionCategory = 'school' | 'park' | 'childcare' | 'hospital';
 type ConditionDestination = {
   id: string;
   name: string;
-  category: 'school' | 'childcare';
+  category: ConditionCategory;
   latitude: number;
   longitude: number;
   address?: string | null;
@@ -76,15 +76,17 @@ type BoundsLike = {
 
 type DisplayMarker = {
   id: string;
-  category: FacilityCategory;
+  category: ActiveFacilityKey;
   name: string;
   latitude: number;
   longitude: number;
   count: number;
   features: MapFeature[];
 };
+type ActiveMapFeature = MapFeature & { category: ActiveFacilityKey };
 
-const facilityCategoryKeys: FacilityCategory[] = ['kids', 'school', 'crosswalk', 'signal', 'cctv', 'risk'];
+const facilityCategoryKeys: ActiveFacilityKey[] = ['kids', 'school', 'crosswalk', 'signal', 'cctv', 'risk'];
+const conditionFacilityCategoryKeys: FacilityCategory[] = ['school', 'kids', 'park', 'hospital', 'crosswalk', 'signal', 'cctv'];
 const defaultActiveFilters: ActiveFacilityKey[] = ['kids', 'school'];
 function getSavedConditionState() {
   try {
@@ -136,6 +138,13 @@ const facilityColors: Record<Exclude<FacilityKey, 'all'> | 'home', string> = {
   signal: '#A2D6F1',
   cctv: '#9B6DE7',
   risk: '#FF5B66',
+};
+
+const conditionCategoryMeta: Record<ConditionCategory, { label: string; icon: string }> = {
+  school: { label: '학교', icon: '🏫' },
+  park: { label: '공원', icon: '🌳' },
+  childcare: { label: '유치원·어린이집', icon: '🧸' },
+  hospital: { label: '병원', icon: '🏥' },
 };
 
 const clusterMergeDistancePx = 49;
@@ -275,6 +284,14 @@ function getSummaryCount(summary: FeatureSummary[], category: FacilityCategory) 
   return summary.find((item) => item.category === category)?.count ?? 0;
 }
 
+function isActiveFacilityCategory(category: FacilityCategory): category is ActiveFacilityKey {
+  return facilityCategoryKeys.includes(category as ActiveFacilityKey);
+}
+
+function isActiveMapFeature(feature: MapFeature): feature is ActiveMapFeature {
+  return isActiveFacilityCategory(feature.category);
+}
+
 function getFeatureSummaryItems(summary: FeatureSummary[]) {
   return [
     { key: 'kids' as const, label: '어린이시설', value: `${getSummaryCount(summary, 'kids')}곳` },
@@ -348,8 +365,10 @@ function mergeClusterMarkersByOverlap(markers: DisplayMarker[], zoom: number) {
 }
 
 function getDisplayMarkers(features: MapFeature[], zoom: number): DisplayMarker[] {
-  if (features.some((feature) => feature.source === 'cluster')) {
-    const markers = features.filter((feature) => zoom < 17 || feature.source !== 'cluster').map((feature) => {
+  const visibleFeatures = features.filter(isActiveMapFeature);
+
+  if (visibleFeatures.some((feature) => feature.source === 'cluster')) {
+    const markers = visibleFeatures.filter((feature) => zoom < 17 || feature.source !== 'cluster').map((feature) => {
       const count = typeof feature.metadata?.count === 'number' ? feature.metadata.count : 1;
       return {
         id: feature.id,
@@ -366,7 +385,7 @@ function getDisplayMarkers(features: MapFeature[], zoom: number): DisplayMarker[
 
   const gridMeters = getClusterGridMeters(zoom);
   if (gridMeters === 0) {
-    return features.map((feature) => ({
+    return visibleFeatures.map((feature) => ({
       id: feature.id,
       category: feature.category,
       name: feature.name,
@@ -377,8 +396,8 @@ function getDisplayMarkers(features: MapFeature[], zoom: number): DisplayMarker[
     }));
   }
 
-  const buckets = new Map<string, MapFeature[]>();
-  for (const feature of features) {
+  const buckets = new Map<string, ActiveMapFeature[]>();
+  for (const feature of visibleFeatures) {
     const latGrid = gridMeters / 111320;
     const lngGrid = gridMeters / (111320 * Math.cos((feature.latitude * Math.PI) / 180));
     const latKey = Math.round(feature.latitude / latGrid);
@@ -463,9 +482,18 @@ export function NaverMapPreview({
   const displayMarkers = useMemo(() => getDisplayMarkers(features, currentZoom), [features, currentZoom]);
   const conditionCandidates = useMemo(() => {
     if (!selectedApartment) return [];
-    const candidates = conditionFeatures.filter((feature) => feature.category === 'school' || (feature.category === 'kids' && feature.source === 'childcare_centers'));
+    const candidates = conditionFeatures.filter((feature) =>
+      feature.category === 'school'
+      || feature.category === 'park'
+      || feature.category === 'hospital'
+      || (feature.category === 'kids' && feature.source === 'childcare_centers'),
+    );
     return candidates.map((feature) => {
-      const category = feature.category === 'school' ? 'school' as const : 'childcare' as const;
+      const category: ConditionCategory =
+        feature.category === 'school' ? 'school'
+          : feature.category === 'park' ? 'park'
+            : feature.category === 'hospital' ? 'hospital'
+              : 'childcare';
       const directDistance = distanceMeters(selectedApartment.latitude, selectedApartment.longitude, feature.latitude, feature.longitude);
       const route = [
         { latitude: selectedApartment.latitude, longitude: selectedApartment.longitude },
@@ -642,7 +670,7 @@ export function NaverMapPreview({
     }
 
     let cancelled = false;
-    getNearbyFeatures(selectedApartment.id, facilityCategoryKeys, 1000)
+    getNearbyFeatures(selectedApartment.id, conditionFacilityCategoryKeys, 1000)
       .then((result) => {
         if (!cancelled) {
           setCompareSummary(result.summary);
@@ -739,7 +767,7 @@ export function NaverMapPreview({
           title: destination.name,
           zIndex: isSelected ? 100 : 90,
           icon: {
-            content: `<button class="condition-map-label${isSelected ? ' condition-map-label--selected' : ''}" type="button"><span>🏫</span><b>${escapeHtml(destination.name)}</b><small>도보 ${destination.minutes}분 · ${destination.distance}m</small></button>`,
+            content: `<button class="condition-map-label${isSelected ? ' condition-map-label--selected' : ''}" type="button"><span>${conditionCategoryMeta[destination.category].icon}</span><b>${escapeHtml(destination.name)}</b><small>도보 ${destination.minutes}분 · ${destination.distance}m</small></button>`,
             anchor: new window.naver!.maps.Point(82, 28),
           },
         });
@@ -1123,7 +1151,7 @@ export function NaverMapPreview({
             <>
               <section className="condition-summary" aria-label="조건 지도 요약">
                 <div><small>선택 단지</small><b>{selectedApartment.name}</b><span>→</span><strong>{conditionStep === 'route' ? '보행 조건' : '목적지 선택'}</strong></div>
-                <p>{selectedDestination ? `${selectedDestination.name}까지 도보 ${selectedDestination.minutes}분 · ${selectedDestination.distance}m` : '학교·유치원·어린이집 등 목적지를 선택하세요.'}</p>
+                <p>{selectedDestination ? `${selectedDestination.name}까지 도보 ${selectedDestination.minutes}분 · ${selectedDestination.distance}m` : '학교·공원·유치원·어린이집·병원 중 목적지를 선택하세요.'}</p>
                 {selectedDestination && <button onClick={resetDestination} type="button">목적지 초기화</button>}
               </section>
 
@@ -1137,10 +1165,10 @@ export function NaverMapPreview({
 
               <aside className="condition-control-card">
                 <div className="condition-control-title"><div><small>{conditionStep === 'route' ? '선택한 경로' : '목적지 탐색'}</small><h2>{conditionStep === 'route' ? '조건 분석' : '어디로 갈까요?'}</h2></div><button onClick={() => setDestinationMenuOpen((open) => !open)} type="button">✨</button></div>
-                {conditionStep === 'route' && selectedDestination ? <div className="condition-metrics"><div><span>🚶</span><small>도보 시간</small><b>{selectedDestination.minutes}분</b></div><div><span>🚸</span><small>횡단보도</small><b>{selectedDestination.crosswalks}개</b></div><div><span>🚦</span><small>보행신호</small><b>{selectedDestination.signals}개</b></div><div><span>📹</span><small>CCTV</small><b>{selectedDestination.cctv}개</b></div><button onClick={resetDestination} type="button">다른 목적지 선택</button></div> : <div className="condition-categories">{([['school','학교','🏫'],['park','공원','🌳'],['childcare','유치원·어린이집','🧸'],['hospital','병원','🏥']] as const).map(([key,label,icon]) => <button className={visibleConditionCategories.includes(key) ? 'is-active' : ''} key={key} onClick={() => toggleConditionCategory(key)} type="button"><span>{icon}</span>{label}<small>{visibleConditionCategories.includes(key) ? '표시 중' : '선택'}</small></button>)}</div>}
-                {destinationMenuOpen && <div className="destination-menu">{conditionCandidates.map((item) => <button key={item.id} onClick={() => selectDestination(item)} type="button"><span>🏫 {item.name}</span><small>도보 {item.minutes}분 · {item.distance}m</small></button>)}</div>}
+                {conditionStep === 'route' && selectedDestination ? <div className="condition-metrics"><div><span>🚶</span><small>도보 시간</small><b>{selectedDestination.minutes}분</b></div><div><span>🚸</span><small>횡단보도</small><b>{selectedDestination.crosswalks}개</b></div><div><span>🚦</span><small>보행신호</small><b>{selectedDestination.signals}개</b></div><div><span>📹</span><small>CCTV</small><b>{selectedDestination.cctv}개</b></div><button onClick={resetDestination} type="button">다른 목적지 선택</button></div> : <div className="condition-categories">{(Object.entries(conditionCategoryMeta) as Array<[ConditionCategory, { label: string; icon: string }]>).map(([key, meta]) => <button className={visibleConditionCategories.includes(key) ? 'is-active' : ''} key={key} onClick={() => toggleConditionCategory(key)} type="button"><span>{meta.icon}</span>{meta.label}<small>{visibleConditionCategories.includes(key) ? '표시 중' : '선택'}</small></button>)}</div>}
+                {destinationMenuOpen && <div className="destination-menu">{conditionCandidates.map((item) => <button key={item.id} onClick={() => selectDestination(item)} type="button"><span>{conditionCategoryMeta[item.category].icon} {item.name}</span><small>도보 {item.minutes}분 · {item.distance}m</small></button>)}</div>}
               </aside>
-              {conditionStep === 'select' && conditionCandidates.length === 0 && <div className="condition-empty">주변 학교·어린이집 정보를 불러오는 중입니다.</div>}
+              {conditionStep === 'select' && conditionCandidates.length === 0 && <div className="condition-empty">주변 학교·공원·어린이집·병원 정보를 불러오는 중입니다.</div>}
             </>
           )}
 
