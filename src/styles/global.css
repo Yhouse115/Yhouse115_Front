@@ -1060,6 +1060,28 @@ a {
   font-weight: 850;
 }
 
+.map-view-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #e6e6e8;
+  border-radius: 13px;
+  background: #f6f6f7;
+}
+
+.map-view-tabs button {
+  min-height: 34px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #77757a;
+  font-size: .8rem;
+  font-weight: 850;
+}
+
+.map-view-tabs button.is-active { background: #3e5871; color: #fff; box-shadow: 0 4px 12px rgba(62,88,113,.2); }
+
 .family-map-logo {
   display: grid;
   width: 108px;
@@ -1714,6 +1736,71 @@ a {
   border-radius: 14px;
   background: #ffffff;
   box-shadow: 0 8px 24px rgba(15, 31, 61, 0.16);
+}
+
+.condition-summary,
+.condition-apartment-card,
+.condition-control-card {
+  position: absolute;
+  z-index: 8;
+  border: 1px solid #e6e6e8;
+  border-radius: 18px;
+  background: rgba(255,255,255,.97);
+  box-shadow: 0 10px 28px rgba(15,31,61,.15);
+  backdrop-filter: blur(10px);
+}
+
+.condition-summary { top: 12px; right: 18px; left: 196px; display: flex; min-height: 68px; align-items: center; gap: 18px; padding: 12px 18px; }
+.condition-summary div { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.condition-summary small { color: #77757a; font-weight: 800; white-space: nowrap; }
+.condition-summary b { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.condition-summary strong { padding: 7px 10px; border-radius: 999px; background: #eff8f1; color: #347a49; font-size: .78rem; white-space: nowrap; }
+.condition-summary p { margin: 0 0 0 auto; color: #55545a; font-size: .8rem; font-weight: 750; text-align: right; }
+.condition-summary > button { flex: 0 0 auto; padding: 8px 10px; border: 0; border-radius: 10px; background: #f1f1f3; color: #656365; font-size: .75rem; font-weight: 850; }
+
+.condition-apartment-card { top: 98px; left: 18px; width: 280px; padding: 20px; }
+.condition-apartment-card > small,.condition-control-title small { color: #77757a; font-size: .72rem; font-weight: 850; }
+.condition-apartment-card h2,.condition-control-card h2 { margin: 5px 0; font-size: 1.08rem; }
+.condition-apartment-card > p { margin: 0 0 14px; color: #77757a; font-size: .72rem; line-height: 1.45; }
+.condition-apartment-card dl { display: grid; gap: 9px; margin: 0 0 15px; padding-top: 14px; border-top: 1px solid #ececef; }
+.condition-apartment-card dl div { display: flex; justify-content: space-between; gap: 10px; font-size: .75rem; }
+.condition-apartment-card dt { color: #77757a; }
+.condition-apartment-card dd { margin: 0; font-weight: 850; text-align: right; }
+.condition-apartment-card > button { width: 100%; min-height: 40px; border: 0; border-radius: 11px; background: #e9f7eb; color: #347a49; font-weight: 850; }
+
+.condition-control-card { top: 98px; right: 18px; width: 270px; padding: 17px; }
+.condition-control-title { display: flex; align-items: center; justify-content: space-between; }
+.condition-control-title > button { width: 36px; height: 36px; border: 0; border-radius: 11px; background: #eef4ff; }
+.condition-categories { display: grid; gap: 6px; margin-top: 12px; }
+.condition-categories > button { display: grid; grid-template-columns: 28px 1fr auto; align-items: center; gap: 8px; padding: 9px; border: 1px solid #ececef; border-radius: 11px; background: #fff; text-align: left; }
+.condition-categories > button.is-active { border-color: #a9d7b3; background: #eff8f1; color: #347a49; font-weight: 850; }
+.condition-categories small { color: #99979b; font-size: .65rem; }
+.condition-metrics { display: grid; gap: 7px; margin-top: 12px; }
+.condition-metrics > div { display: grid; grid-template-columns: 30px 1fr auto; align-items: center; padding: 10px; border-radius: 11px; background: #f7f8f9; }
+.condition-metrics small { color: #77757a; }
+.condition-metrics > button { min-height: 38px; border: 0; border-radius: 11px; background: #3e5871; color: #fff; font-weight: 850; }
+.destination-menu { position: absolute; top: 62px; right: 12px; left: 12px; z-index: 4; display: grid; gap: 5px; padding: 8px; border: 1px solid #e6e6e8; border-radius: 13px; background: #fff; box-shadow: 0 12px 26px rgba(15,31,61,.16); }
+.destination-menu button { display: flex; justify-content: space-between; padding: 9px; border: 0; border-radius: 9px; background: #fff; text-align: left; }
+.destination-menu button:hover { background: #eff8f1; }
+.destination-menu small { color: #347a49; font-weight: 850; }
+
+.condition-destinations,.condition-route-layer { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
+.condition-destinations button { position: absolute; display: grid; grid-template-columns: auto 1fr; gap: 2px 7px; padding: 8px 11px; border: 1px solid #dde3e8; border-radius: 12px; background: #fff; box-shadow: 0 7px 18px rgba(15,31,61,.18); pointer-events: auto; text-align: left; transform: translate(-50%,-50%); }
+.condition-destinations button span { grid-row: 1 / 3; align-self: center; font-size: 1.15rem; }
+.condition-destinations button b { font-size: .74rem; white-space: nowrap; }
+.condition-destinations button small { color: #347a49; font-size: .66rem; font-weight: 850; }
+.condition-route-layer svg { width: 100%; height: 100%; }
+.condition-route-layer polyline { fill: none; stroke: #3e78df; stroke-width: 7; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 2 2; filter: drop-shadow(0 2px 2px rgba(47,111,228,.2)); }
+.route-marker { position: absolute; display: grid; width: 34px; height: 34px; place-items: center; border: 3px solid #fff; border-radius: 50%; box-shadow: 0 5px 12px rgba(15,31,61,.2); transform: translate(-50%,-50%); }
+.route-marker--crosswalk { background: #a5d3a8; }.route-marker--signal { background: #a2d6f1; }
+.route-destination { position: absolute; padding: 10px 12px; border: 0; border-radius: 12px; background: #fff; box-shadow: 0 7px 18px rgba(15,31,61,.2); font-weight: 850; pointer-events: auto; transform: translate(-50%,-50%); }
+
+@media (max-width: 900px) {
+  .map-view-tabs button { padding: 0 9px; font-size: .72rem; }
+  .condition-summary { left: 12px; }
+  .condition-summary p { display: none; }
+  .condition-apartment-card { display: none; }
+  .condition-control-card { top: 92px; width: min(250px, calc(100% - 24px)); }
 }
 
 .map-apartment-caption {

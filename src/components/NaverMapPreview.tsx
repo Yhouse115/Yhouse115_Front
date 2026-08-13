@@ -16,6 +16,18 @@ import {
 type MapStatus = 'loading' | 'ready' | 'missing-key' | 'error';
 type FacilityKey = 'all' | 'kids' | 'school' | 'crosswalk' | 'signal' | 'cctv' | 'risk';
 type ActiveFacilityKey = Exclude<FacilityKey, 'all'>;
+type MapView = 'life' | 'condition';
+type ConditionCategory = 'school' | 'park' | 'childcare' | 'hospital';
+type ConditionDestination = {
+  id: string;
+  name: string;
+  category: 'school' | 'childcare';
+  minutes: number;
+  distance: number;
+  crosswalks: number;
+  signals: number;
+  position: { left: string; top: string };
+};
 
 type MapOptions = {
   center?: unknown;
@@ -71,6 +83,21 @@ type DisplayMarker = {
 
 const facilityCategoryKeys: FacilityCategory[] = ['kids', 'school', 'crosswalk', 'signal', 'cctv', 'risk'];
 const defaultActiveFilters: ActiveFacilityKey[] = ['kids', 'school'];
+const conditionDestinations: ConditionDestination[] = [
+  { id: 'jeongmok', name: '정목초등학교', category: 'school', minutes: 7, distance: 520, crosswalks: 3, signals: 4, position: { left: '63%', top: '39%' } },
+  { id: 'yangjeong', name: '양정초등학교', category: 'school', minutes: 11, distance: 780, crosswalks: 5, signals: 3, position: { left: '50%', top: '27%' } },
+  { id: 'mokdong-kindergarten', name: '목동유치원', category: 'childcare', minutes: 9, distance: 640, crosswalks: 2, signals: 2, position: { left: '43%', top: '54%' } },
+];
+
+function getSavedConditionState() {
+  try {
+    const saved = window.sessionStorage.getItem('whyhouse:condition-map');
+    if (!saved) return null;
+    return JSON.parse(saved) as { destinationId?: string; conditionStep?: 'select' | 'route'; visibleCategories?: ConditionCategory[] };
+  } catch {
+    return null;
+  }
+}
 
 const facilityFilters: Array<{ key: FacilityKey; label: string; icon: string }> = [
   { key: 'all', label: '전체', icon: '🗺️' },
@@ -392,6 +419,14 @@ export function NaverMapPreview({
   const [compareSummary, setCompareSummary] = useState<FeatureSummary[]>([]);
   const [compareTarget, setCompareTarget] = useState<string>('');
   const [currentZoom, setCurrentZoom] = useState(15);
+  const [mapView, setMapView] = useState<MapView>('life');
+  const [conditionStep, setConditionStep] = useState<'select' | 'route'>(() => getSavedConditionState()?.conditionStep ?? 'select');
+  const [selectedDestination, setSelectedDestination] = useState<ConditionDestination | null>(() => {
+    const destinationId = getSavedConditionState()?.destinationId;
+    return conditionDestinations.find((item) => item.id === destinationId) ?? null;
+  });
+  const [visibleConditionCategories, setVisibleConditionCategories] = useState<ConditionCategory[]>(() => getSavedConditionState()?.visibleCategories ?? ['school', 'park']);
+  const [destinationMenuOpen, setDestinationMenuOpen] = useState(false);
 
   const activeCategories = useMemo(() => getActiveCategories(activeFilters), [activeFilters]);
   const topApartmentSuggestions = useMemo(
@@ -410,6 +445,15 @@ export function NaverMapPreview({
   useEffect(() => {
     selectedApartmentRef.current = selectedApartment;
   }, [selectedApartment]);
+
+  useEffect(() => {
+    window.sessionStorage.setItem('whyhouse:condition-map', JSON.stringify({
+      destinationId: selectedDestination?.id,
+      conditionStep,
+      visibleCategories: visibleConditionCategories,
+      lastUpdatedAt: Date.now(),
+    }));
+  }, [conditionStep, selectedDestination, visibleConditionCategories]);
 
   useEffect(() => {
     activeCategoriesRef.current = activeCategories;
@@ -694,6 +738,8 @@ export function NaverMapPreview({
     setSelectedApartment(apartment);
     setSidebarOpen(false);
     setSelectedFacility(null);
+    setSelectedDestination(null);
+    setConditionStep('select');
 
     const map = mapRef.current;
     if (window.naver?.maps && map) {
@@ -774,6 +820,24 @@ export function NaverMapPreview({
     setTopSearchOpen(false);
   }
 
+  function selectDestination(destination: ConditionDestination) {
+    setSelectedDestination(destination);
+    setConditionStep('route');
+    setDestinationMenuOpen(false);
+    setSelectedFacility(null);
+  }
+
+  function resetDestination() {
+    setSelectedDestination(null);
+    setConditionStep('select');
+  }
+
+  function toggleConditionCategory(category: ConditionCategory) {
+    setVisibleConditionCategories((current) => current.includes(category)
+      ? current.filter((item) => item !== category)
+      : [...current, category]);
+  }
+
   return (
     <section className="family-map-page" aria-label="이집 어때요 생활 지도">
       <header className="family-map-bar">
@@ -781,6 +845,10 @@ export function NaverMapPreview({
           <img alt="왜집?" src={waezipLogo} />
         </button>
         <button aria-label="처음 화면으로 돌아가기" className="family-map-back" onClick={onBackHome} type="button">‹</button>
+        <nav className="map-view-tabs" aria-label="지도 종류">
+          <button className={mapView === 'life' ? 'is-active' : ''} onClick={() => setMapView('life')} type="button">생활환경 지도</button>
+          <button className={mapView === 'condition' ? 'is-active' : ''} onClick={() => { setMapView('condition'); setSidebarOpen(false); }} type="button">조건 지도</button>
+        </nav>
         <div className={topSearchOpen ? 'top-search top-search--expanded' : 'top-search'}>
           <button
             aria-label="아파트 검색 열기"
@@ -926,7 +994,7 @@ export function NaverMapPreview({
             </button>
           )}
 
-          {selectedApartment && !sidebarOpen && (
+          {selectedApartment && !sidebarOpen && mapView === 'life' && (
             <div className="map-facility-panel">
               <div className="facility-heading">
                 <div>
@@ -966,6 +1034,33 @@ export function NaverMapPreview({
                 </button>
               </div>
             </div>
+          )}
+
+          {selectedApartment && !sidebarOpen && mapView === 'condition' && (
+            <>
+              <section className="condition-summary" aria-label="조건 지도 요약">
+                <div><small>선택 단지</small><b>{selectedApartment.name}</b><span>→</span><strong>{conditionStep === 'route' ? '보행 조건' : '목적지 선택'}</strong></div>
+                <p>{selectedDestination ? `${selectedDestination.name}까지 도보 ${selectedDestination.minutes}분 · ${selectedDestination.distance}m` : '학교·유치원·어린이집 등 목적지를 선택하세요.'}</p>
+                {selectedDestination && <button onClick={resetDestination} type="button">목적지 초기화</button>}
+              </section>
+
+              <aside className="condition-apartment-card">
+                <small>선택 단지</small><h2>{selectedApartment.name}</h2><p>{selectedApartment.address}</p>
+                <dl>
+                  {selectedDestination ? <><div><dt>통학 목적지</dt><dd>{selectedDestination.name}</dd></div><div><dt>도보 시간</dt><dd>{selectedDestination.minutes}분</dd></div><div><dt>횡단보도</dt><dd>{selectedDestination.crosswalks}개</dd></div><div><dt>보행신호</dt><dd>{selectedDestination.signals}개</dd></div></> : <><div><dt>현재 상태</dt><dd>목적지 선택 전</dd></div><div><dt>분석 기준</dt><dd>도보 경로</dd></div></>}
+                </dl>
+                <button onClick={onOpenInvestment} type="button">단지 상세 보기</button>
+              </aside>
+
+              <aside className="condition-control-card">
+                <div className="condition-control-title"><div><small>{conditionStep === 'route' ? '선택한 경로' : '목적지 탐색'}</small><h2>{conditionStep === 'route' ? '조건 분석' : '어디로 갈까요?'}</h2></div><button onClick={() => setDestinationMenuOpen((open) => !open)} type="button">✨</button></div>
+                {conditionStep === 'route' && selectedDestination ? <div className="condition-metrics"><div><span>🚶</span><small>도보 시간</small><b>{selectedDestination.minutes}분</b></div><div><span>🚸</span><small>횡단보도</small><b>{selectedDestination.crosswalks}개</b></div><div><span>🚦</span><small>보행신호</small><b>{selectedDestination.signals}개</b></div><button onClick={resetDestination} type="button">다른 목적지 선택</button></div> : <div className="condition-categories">{([['school','학교','🏫'],['park','공원','🌳'],['childcare','유치원·어린이집','🧸'],['hospital','병원','🏥']] as const).map(([key,label,icon]) => <button className={visibleConditionCategories.includes(key) ? 'is-active' : ''} key={key} onClick={() => toggleConditionCategory(key)} type="button"><span>{icon}</span>{label}<small>{visibleConditionCategories.includes(key) ? '표시 중' : '선택'}</small></button>)}</div>}
+                {destinationMenuOpen && <div className="destination-menu">{conditionDestinations.map((item) => <button key={item.id} onClick={() => selectDestination(item)} type="button"><span>{item.category === 'school' ? '🏫' : '🧸'} {item.name}</span><small>도보 {item.minutes}분</small></button>)}</div>}
+              </aside>
+
+              {conditionStep === 'select' && <div className="condition-destinations">{conditionDestinations.filter((item) => visibleConditionCategories.includes(item.category)).map((item) => <button key={item.id} onClick={() => selectDestination(item)} style={item.position} type="button"><span>{item.category === 'school' ? '🏫' : '🧸'}</span><b>{item.name}</b><small>도보 {item.minutes}분</small></button>)}</div>}
+              {conditionStep === 'route' && selectedDestination && <div className="condition-route-layer" aria-label={`${selectedApartment.name}에서 ${selectedDestination.name}까지 보행 경로`}><svg viewBox="0 0 1000 700" preserveAspectRatio="none"><polyline points="390,555 440,520 455,445 525,405 565,330 650,285" /></svg><span className="route-marker route-marker--crosswalk" style={{left:'46%',top:'60%'}}>🚸</span><span className="route-marker route-marker--signal" style={{left:'53%',top:'49%'}}>🚦</span><span className="route-marker route-marker--signal" style={{left:'60%',top:'39%'}}>🚦</span><button className="route-destination" onClick={resetDestination} style={selectedDestination.position} type="button">🏫 {selectedDestination.name}</button></div>}
+            </>
           )}
 
           <div className="family-naver-map" ref={mapElementRef}>
@@ -1009,7 +1104,7 @@ export function NaverMapPreview({
             </div>
           )}
 
-          {selectedApartment && (
+          {selectedApartment && mapView === 'life' && (
             <div className="map-apartment-caption">
               <small>현재 기준점</small>
               <b>{selectedApartment.name}</b>
