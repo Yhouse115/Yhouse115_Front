@@ -119,7 +119,7 @@ describe('NaverMapPreview', () => {
     expect(mapSetZoom).toHaveBeenLastCalledWith(15);
 
     act(() => {
-      markerClickListeners.at(-1)?.({ stop: vi.fn() });
+      markerClickListeners[markerClickListeners.length - 1]?.({ stop: vi.fn() });
     });
 
     await waitFor(() => {
