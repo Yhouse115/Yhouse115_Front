@@ -3,7 +3,47 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>WhyHouse</title>
+    <title>WhyHouse - 왜집</title>
+    <!-- Stitch Fonts & Material Symbols -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Epilogue:wght@400;700;900&family=Hanken+Grotesk:wght@400;600;700;800;900&display=swap" />
+    <!-- Tailwind CSS CDN for Stitch Mirroring -->
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              "primary": "#264159",
+              "primary-container": "#3e5871",
+              "on-primary": "#ffffff",
+              "secondary": "#3e6844",
+              "secondary-container": "#bcebbf",
+              "tertiary": "#573712",
+              "tertiary-fixed": "#ffdcbc",
+              "surface": "#faf9fb",
+              "surface-container-lowest": "#ffffff",
+              "surface-container-low": "#f4f3f5",
+              "surface-variant": "#e3e2e4",
+              "on-surface": "#1a1c1d",
+              "body-text": "#656365",
+              "outline": "#73777d",
+              "outline-variant": "#c3c7cd",
+              "line": "#e6e6e8",
+              "coral": "#ff5b66",
+              "sky": "#a2d6f1",
+              "yellow": "#f9cc19",
+              "purple": "#9b6de7",
+              "ink": "#0f1f3d"
+            },
+            fontFamily: {
+              "hanken": ["Hanken Grotesk", "sans-serif"],
+              "epilogue": ["Epilogue", "sans-serif"]
+            }
+          }
+        }
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

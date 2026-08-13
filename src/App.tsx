@@ -8,10 +8,13 @@ import investmentImage from './assets/landing-investment-card.png';
 import familyImage from './assets/landing-family-card.png';
 import waezipLogo from './assets/waezip-logo.png';
 
+import { StitchSandboxPage } from './pages/StitchSandboxPage';
+
 const routes = {
   home: '/',
   investment: '/investment',
   familyMap: '/family-map',
+  sandbox: '/sandbox',
 } as const;
 
 function navigateTo(path: string) {
@@ -173,6 +176,10 @@ export default function App() {
     return <FamilyMapPage />;
   }
 
+  if (path === routes.sandbox) {
+    return <StitchSandboxPage />;
+  }
+
   if (path === routes.home && showIntro) {
     return (
       <div className="intro-stack">
@@ -185,6 +192,32 @@ export default function App() {
   }
 
   return (
-    <LandingPage />
+    <>
+      <LandingPage />
+      {/* 개발 및 시운전용 Stitch FE Sandbox 플로팅 버튼 */}
+      <button
+        onClick={() => navigateTo(routes.sandbox)}
+        style={{
+          position: 'fixed',
+          bottom: '24px',
+          right: '24px',
+          zIndex: 9999,
+          backgroundColor: '#264159',
+          color: '#FFFFFF',
+          border: 'none',
+          borderRadius: '999px',
+          padding: '12px 20px',
+          fontWeight: 700,
+          fontSize: '13px',
+          cursor: 'pointer',
+          boxShadow: '0 8px 24px rgba(38,65,89,0.3)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+        }}
+      >
+        <span>🧪</span> Stitch 모듈 샌드박스 테스트
+      </button>
+    </>
   );
 }
