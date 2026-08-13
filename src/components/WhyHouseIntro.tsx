@@ -10,11 +10,11 @@ import { INTRO_TIMING, MOTION } from './intro.constants';
 type WhyHouseIntroProps = { onComplete: () => void };
 
 const MARKERS = [
-  { id: 'apartment', label: '선택 아파트', color: '#5C9FD0' },
-  { id: 'school', label: '학교', color: '#F9CC19' },
-  { id: 'traffic', label: '신호등', color: '#A2D6F1' },
-  { id: 'market', label: '마트', color: '#1ABC9C' },
-  { id: 'home', label: '주거', color: '#A5D3A8' },
+  { id: 'apartment', icon: '🏢', label: '선택 아파트', color: '#5C9FD0' },
+  { id: 'school', icon: '🏫', label: '학교', color: '#F9CC19' },
+  { id: 'traffic', icon: '🚦', label: '신호등', color: '#A2D6F1' },
+  { id: 'market', icon: '🛒', label: '마트', color: '#1ABC9C' },
+  { id: 'home', icon: '🏡', label: '주거', color: '#A5D3A8' },
 ] as const;
 
 export function WhyHouseIntro({ onComplete }: WhyHouseIntroProps) {
@@ -104,14 +104,14 @@ export function WhyHouseIntro({ onComplete }: WhyHouseIntroProps) {
       <div className="wh-map-scene" aria-label="Neighborhood map">
         <img className="wh-map-background" src={neighborhoodBase} alt="" />
         <img className="wh-point-character" src={pointSprite} alt="" />
-        {MARKERS.map(({ id, label, color }) => (
+        {MARKERS.map(({ id, icon, label, color }) => (
           <span
             className={`wh-map-marker wh-map-marker--${id}`}
             key={id}
             style={{ '--pin-color': color } as React.CSSProperties}
           >
-            <img className="wh-map-marker-img" src={waezipHomeMarker} alt="" />
-            <b className="wh-map-marker-badge">{label}</b>
+            <i aria-hidden="true"><span>{icon}</span></i>
+            <b>{label}</b>
           </span>
         ))}
       </div>
