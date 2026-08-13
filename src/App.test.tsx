@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import App from './App';
 import { AuthProvider } from './features/auth/AuthContext';
@@ -66,11 +66,16 @@ describe('App', () => {
       expect(screen.getByRole('complementary', { name: '아파트 선택과 비교' })).toBeInTheDocument();
     });
 
-    expect(screen.getByRole('button', { name: /목동신시가지 7단지 아파트/ })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /목동신시가지 13단지 아파트/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /왜집의 임장노트/ })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /목동신시가지 7단지 아파트/ }));
+    const searchInput = screen.getByPlaceholderText('아파트 이름을 입력하세요');
+    const searchForm = searchInput.closest('form') as HTMLElement;
+    fireEvent.change(searchInput, { target: { value: '7단지' } });
+
+    expect(await within(searchForm).findByRole('option', { name: /목동신시가지 7단지 아파트/ })).toBeInTheDocument();
+    expect(within(searchForm).queryByRole('option', { name: /목동신시가지 13단지 아파트/ })).not.toBeInTheDocument();
+
+    fireEvent.click(within(searchForm).getByRole('option', { name: /목동신시가지 7단지 아파트/ }));
 
     expect(screen.getByText('무엇을 지도에서 볼까요?')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /아파트 다시 선택/ })).toBeInTheDocument();

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import { AuthProvider } from '../features/auth/AuthContext';
 import { getNearbyFeatures, searchApartments } from '../services/familyMap';
@@ -94,7 +94,10 @@ describe('NaverMapPreview', () => {
       expect(searchApartments).toHaveBeenCalledWith('', 1000);
     });
 
-    fireEvent.click(await screen.findByRole('button', { name: /Test Apartment/ }));
+    const sidebarSearchInput = screen.getByPlaceholderText('아파트 이름을 입력하세요');
+    const sidebarSearchForm = sidebarSearchInput.closest('form') as HTMLElement;
+    fireEvent.change(sidebarSearchInput, { target: { value: 'Test' } });
+    fireEvent.click(await within(sidebarSearchForm).findByRole('option', { name: /Test Apartment/ }));
 
     await waitFor(() => {
       expect(getNearbyFeatures).toHaveBeenCalledWith(
@@ -106,9 +109,12 @@ describe('NaverMapPreview', () => {
   });
 
   it('zooms in when an apartment is selected and restores the zoom when its marker is clicked again', async () => {
-    render(<NaverMapPreview />);
+    renderMap();
 
-    fireEvent.click(await screen.findByRole('button', { name: /Test Apartment/ }));
+    const sidebarSearchInput = screen.getByPlaceholderText('아파트 이름을 입력하세요');
+    const sidebarSearchForm = sidebarSearchInput.closest('form') as HTMLElement;
+    fireEvent.change(sidebarSearchInput, { target: { value: 'Test' } });
+    fireEvent.click(await within(sidebarSearchForm).findByRole('option', { name: /Test Apartment/ }));
     expect(screen.getByText('현재 기준점')).toBeInTheDocument();
     expect(mapSetZoom).toHaveBeenLastCalledWith(15);
 

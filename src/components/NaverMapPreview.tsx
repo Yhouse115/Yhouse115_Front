@@ -241,7 +241,7 @@ function filterApartmentSuggestions(apartments: ApartmentSummary[] | undefined, 
   }
   const normalized = term.trim().toLowerCase();
   if (!normalized) {
-    return apartments.slice(0, limit);
+    return [];
   }
 
   return apartments.filter((apartment) => apartment.name.toLowerCase().includes(normalized)).slice(0, limit);
@@ -483,7 +483,6 @@ export function NaverMapPreview({
     [apartmentOptions, searchTerm],
   );
   const safeApartmentOptions = apartmentOptions ?? [];
-  const sidebarApartmentOptions = safeApartmentOptions.slice(0, 3);
   const compareApartmentOptions = safeApartmentOptions.filter((apartment) => apartment.id !== selectedApartment?.id).slice(0, 5);
   const summaryItems = useMemo(() => getFeatureSummaryItems(compareSummary), [compareSummary]);
   const displayMarkers = useMemo(() => getDisplayMarkers(features, currentZoom), [features, currentZoom]);
@@ -1022,23 +1021,6 @@ export function NaverMapPreview({
               </div>
             )}
           </form>
-
-          <div className="apartment-list">
-            {sidebarApartmentOptions.map((apartment) => (
-              <button
-                className="apartment-option"
-                key={apartment.id}
-                onClick={() => selectApartment(apartment)}
-                type="button"
-              >
-                <span aria-hidden="true">🏙️</span>
-                <div>
-                  <b>{apartment.name}</b>
-                  <small>{apartment.address}</small>
-                </div>
-              </button>
-            ))}
-          </div>
 
           <section className="sidebar-compare" aria-label="아파트 비교">
             <h3>아파트 비교</h3>
