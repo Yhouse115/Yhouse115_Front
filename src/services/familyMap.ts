@@ -74,7 +74,7 @@ export type WalkingRoute = {
 };
 
 export type WalkingRouteCrossingEvent = {
-  crosswalkLinkId: string;
+  crosswalkEventId: string;
   longitude: number;
   latitude: number;
   pedestrianSignals: Array<{ id: string; longitude: number; latitude: number }>;
@@ -195,8 +195,8 @@ function isRouteCoordinate(value: unknown): value is [number, number] {
 function isCrossingEvent(value: unknown): value is WalkingRouteCrossingEvent {
   if (!value || typeof value !== 'object') return false;
   const event = value as Partial<WalkingRouteCrossingEvent>;
-  return typeof event.crosswalkLinkId === 'string'
-    && event.crosswalkLinkId.length > 0
+  return typeof event.crosswalkEventId === 'string'
+    && event.crosswalkEventId.length > 0
     && typeof event.longitude === 'number'
     && Number.isFinite(event.longitude)
     && typeof event.latitude === 'number'

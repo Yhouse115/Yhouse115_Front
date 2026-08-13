@@ -586,7 +586,7 @@ export function NaverMapPreview({
     if (Array.isArray(selectedWalkingRoute.crossingEvents)) {
       return selectedWalkingRoute.crossingEvents.flatMap((event) => [
         {
-          id: `crosswalk:${event.crosswalkLinkId}`,
+          id: `crosswalk:${event.crosswalkEventId}`,
           category: 'crosswalk' as const,
           name: '실제 통과 횡단보도',
           latitude: event.latitude,
