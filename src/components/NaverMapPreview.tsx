@@ -980,6 +980,14 @@ export function NaverMapPreview({
     setSelectedFacility(null);
   }
 
+  function resetToApartmentSelectionMap() {
+    setSidebarOpen(false);
+    setSearchTerm('');
+    setTopSearchOpen(false);
+    setApartmentOptions(defaultApartmentOptionsRef.current);
+    deselectApartment();
+  }
+
   function changeFilter(nextFilter: FacilityKey) {
     if (nextFilter === 'all') {
       setActiveFilters((current) =>
@@ -1196,7 +1204,7 @@ export function NaverMapPreview({
                     <span>보행신호 {getSummaryCount(summary, 'signal')}개</span>
                   </p>
                 </div>
-                <button onClick={openSidebar} type="button">🏢 아파트 다시 선택</button>
+                <button onClick={resetToApartmentSelectionMap} type="button">🏢 아파트 다시 선택</button>
               </div>
               <div className="facility-filters" aria-label="시설 필터">
                 {facilityFilters.map((filter) => (
