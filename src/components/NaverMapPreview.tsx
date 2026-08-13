@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { env } from '../config/env';
+import { LoginButton } from '../features/auth/LoginButton';
 import waezipHomeMarker from '../assets/waezip-home-marker.png';
 import waezipLogo from '../assets/waezip-logo.png';
 import {
@@ -906,6 +907,7 @@ export function NaverMapPreview({
             )}
           </form>
         </div>
+        <LoginButton />
       </header>
 
       <div className={sidebarOpen ? 'map-layout map-layout--sidebar-open' : 'map-layout'}>
