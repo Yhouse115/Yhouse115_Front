@@ -623,7 +623,7 @@ export function NaverMapPreview({
   useEffect(() => {
     let cancelled = false;
     setDataStatus('loading');
-    searchApartments('', 10)
+    searchApartments('', 1000)
       .then((items) => {
         if (cancelled) {
           return;
