@@ -7,11 +7,10 @@ import { AuthContext, type AuthContextValue } from './context';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(isSupabaseConfigured);
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
-      setIsLoading(false);
       return;
     }
 
