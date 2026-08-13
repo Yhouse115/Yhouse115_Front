@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { HealthCheck } from './components/HealthCheck';
 import { NaverMapPreview } from './components/NaverMapPreview';
 import { WhyHouseIntro } from './components/WhyHouseIntro';
+import { LoginButton } from './features/auth/LoginButton';
 import investmentImage from './assets/landing-investment-card.png';
 import familyImage from './assets/landing-family-card.png';
 import waezipLogo from './assets/waezip-logo.png';
@@ -25,7 +26,10 @@ function LandingPage() {
         <button aria-label="왜집 홈" className="landing-logo" type="button">
           <img alt="왜집?" src={waezipLogo} />
         </button>
-        <p>집을 보는 두 가지 시선</p>
+        <div className="landing-bar-end">
+          <p>집을 보는 두 가지 시선</p>
+          <LoginButton />
+        </div>
       </header>
       <main className="landing-shell">
         <section className="landing-choice" aria-label="WhyHouse entry routes">
@@ -93,13 +97,16 @@ function PageFrame({ children, title }: { children: ReactNode; title: string }) 
         <button onClick={() => navigateTo(routes.home)} type="button">
           WhyHouse
         </button>
-        <div>
-          <button onClick={() => navigateTo(routes.investment)} type="button">
-            입장노트
-          </button>
-          <button onClick={() => navigateTo(routes.familyMap)} type="button">
-            생활지도
-          </button>
+        <div className="top-nav-end">
+          <div>
+            <button onClick={() => navigateTo(routes.investment)} type="button">
+              입장노트
+            </button>
+            <button onClick={() => navigateTo(routes.familyMap)} type="button">
+              생활지도
+            </button>
+          </div>
+          <LoginButton />
         </div>
       </nav>
       <p className="page-label">{title}</p>
