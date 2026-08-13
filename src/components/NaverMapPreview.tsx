@@ -4,7 +4,6 @@ import { env } from '../config/env';
 import waezipHomeMarker from '../assets/waezip-home-marker.png';
 import waezipLogo from '../assets/waezip-logo.png';
 import {
-  getFeaturesInBounds,
   getNearbyFeatures,
   searchApartments,
   type ApartmentSummary,
@@ -47,10 +46,6 @@ type MapInstance = {
   setCenter?: (center: unknown) => void;
   setZoom?: (zoom: number) => void;
   getZoom?: () => number;
-  getBounds?: () => {
-    getSW: () => { lat: () => number; lng: () => number };
-    getNE: () => { lat: () => number; lng: () => number };
-  };
 };
 
 type MarkerInstance = {
@@ -69,11 +64,6 @@ type NaverMapsEvent = {
   trigger?: (target: MapInstance, eventName: string) => void;
 };
 
-type BoundsLike = {
-  getSW: () => { lat: () => number; lng: () => number };
-  getNE: () => { lat: () => number; lng: () => number };
-};
-
 type DisplayMarker = {
   id: string;
   category: ActiveFacilityKey;
@@ -88,6 +78,7 @@ type ActiveMapFeature = MapFeature & { category: ActiveFacilityKey };
 const facilityCategoryKeys: ActiveFacilityKey[] = ['kids', 'school', 'crosswalk', 'signal', 'cctv', 'risk'];
 const conditionFacilityCategoryKeys: FacilityCategory[] = ['school', 'kids', 'park', 'hospital', 'crosswalk', 'signal', 'cctv'];
 const defaultActiveFilters: ActiveFacilityKey[] = ['kids', 'school'];
+const nearbyRadiusM = 1000;
 function getSavedConditionState() {
   try {
     const saved = window.sessionStorage.getItem('whyhouse:condition-map');
@@ -436,11 +427,6 @@ export function NaverMapPreview({
   const facilityMarkerRefs = useRef<Array<{ marker: MarkerInstance; item: DisplayMarker }>>([]);
   const conditionMarkerRefs = useRef<MarkerInstance[]>([]);
   const savedDestinationIdRef = useRef(getSavedConditionState()?.destinationId);
-  const featureRequestIdRef = useRef(0);
-  const selectedApartmentRef = useRef<ApartmentSummary | null>(null);
-  const activeCategoriesRef = useRef<FacilityCategory[]>([]);
-  const boundsFetchTimerRef = useRef<number | null>(null);
-  const lastBoundsRequestKeyRef = useRef('');
   const defaultApartmentOptionsRef = useRef<ApartmentSummary[]>([]);
   const [status, setStatus] = useState<MapStatus>(() =>
     env.naverMapsClientId ? 'loading' : 'missing-key',
@@ -454,8 +440,6 @@ export function NaverMapPreview({
   const [activeFilters, setActiveFilters] = useState<ActiveFacilityKey[]>(defaultActiveFilters);
   const [animatedFilter, setAnimatedFilter] = useState<FacilityKey | null>(null);
   const [selectedFacility, setSelectedFacility] = useState<MapFeature | null>(null);
-  const [features, setFeatures] = useState<MapFeature[]>([]);
-  const [summary, setSummary] = useState<FeatureSummary[]>([]);
   const [compareSummary, setCompareSummary] = useState<FeatureSummary[]>([]);
   const [compareTarget, setCompareTarget] = useState<string>('');
   const [currentZoom, setCurrentZoom] = useState(15);
@@ -467,6 +451,14 @@ export function NaverMapPreview({
   const [destinationMenuOpen, setDestinationMenuOpen] = useState(false);
 
   const activeCategories = useMemo(() => getActiveCategories(activeFilters), [activeFilters]);
+  const features = useMemo(
+    () => conditionFeatures.filter((feature) => activeCategories.includes(feature.category)),
+    [activeCategories, conditionFeatures],
+  );
+  const summary = useMemo(
+    () => compareSummary.filter((item) => activeCategories.includes(item.category)),
+    [activeCategories, compareSummary],
+  );
   const topApartmentSuggestions = useMemo(
     () => filterApartmentSuggestions(apartmentOptions, searchTerm, 12),
     [apartmentOptions, searchTerm],
@@ -509,10 +501,6 @@ export function NaverMapPreview({
   }, [conditionFeatures, selectedApartment]);
 
   useEffect(() => {
-    selectedApartmentRef.current = selectedApartment;
-  }, [selectedApartment]);
-
-  useEffect(() => {
     window.sessionStorage.setItem('whyhouse:condition-map', JSON.stringify({
       destinationId: selectedDestination?.id,
       conditionStep,
@@ -520,10 +508,6 @@ export function NaverMapPreview({
       lastUpdatedAt: Date.now(),
     }));
   }, [conditionStep, selectedDestination, visibleConditionCategories]);
-
-  useEffect(() => {
-    activeCategoriesRef.current = activeCategories;
-  }, [activeCategories]);
 
   useEffect(() => {
     if (!env.naverMapsClientId) {
@@ -555,17 +539,6 @@ export function NaverMapPreview({
         window.naver.maps.Event.addListener(map, 'idle', () => {
           const zoom = map.getZoom?.() ?? 17;
           setCurrentZoom(zoom);
-          if (!selectedApartmentRef.current) {
-            return;
-          }
-
-          if (boundsFetchTimerRef.current) {
-            window.clearTimeout(boundsFetchTimerRef.current);
-          }
-
-          boundsFetchTimerRef.current = window.setTimeout(() => {
-            void refreshFeaturesByBounds(activeCategoriesRef.current);
-          }, 420);
         });
         window.naver.maps.Event.addListener(map, 'click', () => {
           setSelectedFacility(null);
@@ -580,9 +553,6 @@ export function NaverMapPreview({
 
     return () => {
       cancelled = true;
-      if (boundsFetchTimerRef.current) {
-        window.clearTimeout(boundsFetchTimerRef.current);
-      }
     };
   }, []);
 
@@ -666,21 +636,26 @@ export function NaverMapPreview({
   useEffect(() => {
     if (!selectedApartment) {
       setCompareSummary([]);
+      setConditionFeatures([]);
+      setDataStatus('idle');
       return;
     }
 
     let cancelled = false;
-    getNearbyFeatures(selectedApartment.id, conditionFacilityCategoryKeys, 1000)
+    setDataStatus('loading');
+    getNearbyFeatures(selectedApartment.id, conditionFacilityCategoryKeys, nearbyRadiusM)
       .then((result) => {
         if (!cancelled) {
           setCompareSummary(result.summary);
           setConditionFeatures(result.features);
+          setDataStatus('idle');
         }
       })
       .catch(() => {
         if (!cancelled) {
           setCompareSummary([]);
           setConditionFeatures([]);
+          setDataStatus('error');
         }
       });
 
@@ -779,71 +754,6 @@ export function NaverMapPreview({
       conditionMarkerRefs.current = [];
     };
   }, [conditionCandidates, conditionStep, mapView, selectedApartment, selectedDestination, visibleConditionCategories]);
-
-  useEffect(() => {
-    if (!selectedApartment) {
-      return;
-    }
-
-    void refreshFeaturesByBounds(activeCategories);
-  }, [selectedApartment?.id, activeCategories]);
-
-  async function refreshFeaturesByBounds(categories: FacilityCategory[]) {
-    if (categories.length === 0) {
-      featureRequestIdRef.current += 1;
-      setFeatures([]);
-      setSummary([]);
-      setSelectedFacility(null);
-      setDataStatus('idle');
-      return;
-    }
-
-    const bounds = mapRef.current?.getBounds?.() as BoundsLike | undefined;
-    if (!bounds) {
-      return;
-    }
-
-    const sw = bounds.getSW();
-    const ne = bounds.getNE();
-    const boundsKey = [
-      sw.lat().toFixed(4),
-      sw.lng().toFixed(4),
-      ne.lat().toFixed(4),
-      ne.lng().toFixed(4),
-      categories.join(','),
-    ].join(':');
-    if (lastBoundsRequestKeyRef.current === boundsKey) {
-      return;
-    }
-    lastBoundsRequestKeyRef.current = boundsKey;
-
-    const requestId = featureRequestIdRef.current + 1;
-    featureRequestIdRef.current = requestId;
-    setDataStatus('loading');
-
-    try {
-      const result = await getFeaturesInBounds(
-        {
-          swLat: sw.lat(),
-          swLng: sw.lng(),
-          neLat: ne.lat(),
-          neLng: ne.lng(),
-        },
-        categories,
-        mapRef.current?.getZoom?.() ?? currentZoom,
-      );
-      if (featureRequestIdRef.current !== requestId) {
-        return;
-      }
-      setFeatures(result.features);
-      setSummary(result.summary);
-      setDataStatus('idle');
-    } catch {
-      if (featureRequestIdRef.current === requestId) {
-        setDataStatus('error');
-      }
-    }
-  }
 
   function selectApartment(apartment: ApartmentSummary) {
     setSelectedApartment(apartment);
