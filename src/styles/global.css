@@ -75,6 +75,234 @@ a {
   backdrop-filter: blur(8px);
 }
 
+.rendering-map-intro {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: #f6f5f2;
+}
+
+.real-map-reveal-layer,
+.rendering-intro-layer {
+  position: absolute;
+  inset: 0;
+}
+
+.real-map-reveal-layer {
+  z-index: 1;
+  opacity: 0;
+  filter: blur(5px);
+  clip-path: inset(9% 7% 12% 7% round 28px);
+  pointer-events: none;
+  transform: translateY(26px) scale(0.96);
+  transform-origin: 58% 58%;
+  transition:
+    opacity 860ms cubic-bezier(0.22, 1, 0.36, 1),
+    filter 860ms cubic-bezier(0.22, 1, 0.36, 1),
+    clip-path 860ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 860ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.rendering-map-intro--map_transition .real-map-reveal-layer {
+  opacity: 1;
+  filter: blur(0);
+  clip-path: inset(0% 0% 0% 0% round 0);
+  transform: translateY(0) scale(1);
+}
+
+.rendering-map-intro--map_ready .real-map-reveal-layer {
+  opacity: 1;
+  filter: none;
+  clip-path: inset(0% 0% 0% 0% round 0);
+  pointer-events: auto;
+  transform: none;
+}
+
+.rendering-intro-layer {
+  z-index: 2;
+  overflow: hidden;
+  background: #def4ff;
+  opacity: 1;
+  filter: blur(0);
+  transition:
+    opacity 860ms cubic-bezier(0.22, 1, 0.36, 1),
+    filter 860ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 860ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.rendering-map-intro--map_transition .rendering-intro-layer {
+  opacity: 0;
+  filter: blur(2px);
+  transform: scale(1.025);
+}
+
+.rendering-camera,
+.rendering-bg-layer,
+.rendering-dog-rig,
+.rendering-dog-pose {
+  position: absolute;
+}
+
+.rendering-camera {
+  inset: 0;
+  overflow: hidden;
+  transform-origin: 62% 64%;
+  will-change: transform;
+}
+
+.rendering-bg-layer {
+  inset: -8vh -8vw;
+  transform-origin: 50% 70%;
+  will-change: transform;
+}
+
+.rendering-bg-base,
+.rendering-bg-scene,
+.rendering-frame-hint {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+.rendering-bg-base {
+  z-index: 1;
+}
+
+.rendering-bg-scene {
+  z-index: 2;
+  opacity: 0.86;
+  mix-blend-mode: normal;
+}
+
+.rendering-frame-hint {
+  z-index: 3;
+  background-position: center;
+  background-size: cover;
+  pointer-events: none;
+}
+
+.rendering-dog-shadow {
+  position: absolute;
+  left: 50%;
+  bottom: 14vh;
+  z-index: 4;
+  width: min(30vw, 340px);
+  height: 7vh;
+  border-radius: 999px;
+  background: rgba(68, 52, 34, 0.28);
+  transform-origin: center;
+  will-change: transform, opacity, filter;
+}
+
+.rendering-paper-object {
+  position: absolute;
+  left: 50%;
+  bottom: 13vh;
+  z-index: 5;
+  width: min(42vw, 560px);
+  aspect-ratio: 1.63;
+  border: 8px solid rgba(255, 247, 223, 0.96);
+  border-radius: 18px;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.36) 0 2px, transparent 2px 33.3%, rgba(255, 255, 255, 0.42) 33.3% calc(33.3% + 2px), transparent calc(33.3% + 2px) 66.6%, rgba(255, 255, 255, 0.42) 66.6% calc(66.6% + 2px), transparent calc(66.6% + 2px)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.38) 0 2px, transparent 2px 50%, rgba(255, 255, 255, 0.42) 50% calc(50% + 2px), transparent calc(50% + 2px)),
+    url('/assets/rendering-intro/webp/frame-034.webp') center / cover no-repeat;
+  box-shadow: 0 24px 50px rgba(64, 50, 26, 0.18);
+  transform-origin: 62% 55%;
+  will-change: transform, opacity;
+}
+
+.rendering-paper-object::before,
+.rendering-paper-object::after {
+  position: absolute;
+  content: "";
+  pointer-events: none;
+}
+
+.rendering-paper-object::before {
+  inset: 0;
+  border-radius: 10px;
+  background:
+    radial-gradient(circle at 20% 28%, rgba(255, 194, 92, 0.9) 0 2%, transparent 2.4%),
+    radial-gradient(circle at 70% 36%, rgba(61, 158, 218, 0.95) 0 3.2%, transparent 3.8%),
+    radial-gradient(circle at 54% 68%, rgba(255, 119, 103, 0.8) 0 2.3%, transparent 2.8%);
+  opacity: 0.76;
+}
+
+.rendering-paper-object::after {
+  inset: 9% 13% 12% 13%;
+  border: 3px dashed rgba(244, 174, 62, 0.85);
+  border-radius: 50%;
+  transform: rotate(-12deg);
+  opacity: 0.75;
+}
+
+.rendering-paper-grid {
+  position: absolute;
+  inset: 0;
+  border-radius: 10px;
+  background:
+    radial-gradient(circle at 68% 36%, rgba(54, 147, 215, 0.22), transparent 9%),
+    linear-gradient(135deg, transparent 0 42%, rgba(255, 255, 255, 0.58) 42% 45%, transparent 45% 100%);
+  will-change: opacity;
+}
+
+.rendering-dog-rig {
+  left: 50%;
+  bottom: 18vh;
+  z-index: 6;
+  width: min(28vw, 330px);
+  aspect-ratio: 0.77;
+  transform-origin: 50% 82%;
+  will-change: transform;
+}
+
+.rendering-dog-pose {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center bottom;
+  transition: opacity 90ms ease;
+  will-change: opacity;
+}
+
+.rendering-dog-pose--fall {
+  transform: translateY(-3%) scale(1.06);
+}
+
+.rendering-dog-pose--land,
+.rendering-dog-pose--confused {
+  transform: translateY(7%) scale(1.08);
+}
+
+.rendering-dog-pose--map {
+  transform: translateY(9%) scale(1.1);
+}
+
+.rendering-dog-pose--point {
+  transform: translateY(3%) scale(1.05);
+}
+
+.rendering-intro-skip {
+  position: absolute;
+  z-index: 5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .real-map-reveal-layer,
+  .rendering-intro-layer {
+    transition-duration: 350ms;
+  }
+
+  .rendering-paper-map {
+    transition-duration: 350ms;
+  }
+}
+
 .intro-scene,
 .intro-map-scene {
   position: absolute;
