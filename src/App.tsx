@@ -4,8 +4,8 @@ import { HealthCheck } from './components/HealthCheck';
 import { NaverMapPreview } from './components/NaverMapPreview';
 import { WhyHouseIntro } from './components/WhyHouseIntro';
 import { LoginButton } from './features/auth/LoginButton';
-import investmentImage from './assets/landing-investment-card.png';
-import familyImage from './assets/landing-family-card.png';
+import investmentDog from './assets/intro-sprite-map.png';
+import familyDog from './assets/intro-sprite-point.png';
 import waezipLogo from './assets/waezip-logo.png';
 
 const routes = {
@@ -44,7 +44,7 @@ function LandingPage() {
           <div className="choice-grid">
             <button className="choice-card choice-card--investment" onClick={() => navigateTo(routes.investment)} type="button">
               <span className="choice-art">
-                <img alt="지도와 집을 살펴보는 강아지 일러스트" className="choice-image" src={investmentImage} />
+                <img alt="지도와 집을 살펴보는 강아지 일러스트" className="choice-image" src={investmentDog} />
                 <span className="choice-chip">현장을 살펴봐요!</span>
               </span>
               <span className="choice-title-row">
@@ -62,7 +62,7 @@ function LandingPage() {
 
             <button className="choice-card choice-card--family" onClick={() => navigateTo(routes.familyMap)} type="button">
               <span className="choice-art">
-                <img alt="집 주변 생활권을 안내하는 강아지 일러스트" className="choice-image" src={familyImage} />
+                <img alt="집 주변 생활권을 안내하는 강아지 일러스트" className="choice-image" src={familyDog} />
                 <span className="choice-chip">같이 살펴봐요!</span>
               </span>
               <span className="choice-title-row">
