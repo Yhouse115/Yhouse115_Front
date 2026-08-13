@@ -234,7 +234,10 @@ function getClusterMarkerIcon(count: number) {
   };
 }
 
-function filterApartmentSuggestions(apartments: ApartmentSummary[], term: string, limit: number) {
+function filterApartmentSuggestions(apartments: ApartmentSummary[] | undefined, term: string, limit: number) {
+  if (!apartments) {
+    return [];
+  }
   const normalized = term.trim().toLowerCase();
   if (!normalized) {
     return apartments.slice(0, limit);
@@ -453,8 +456,9 @@ export function NaverMapPreview({
     () => filterApartmentSuggestions(apartmentOptions, searchTerm, 12),
     [apartmentOptions, searchTerm],
   );
-  const sidebarApartmentOptions = apartmentOptions.slice(0, 3);
-  const compareApartmentOptions = apartmentOptions.filter((apartment) => apartment.id !== selectedApartment?.id).slice(0, 5);
+  const safeApartmentOptions = apartmentOptions ?? [];
+  const sidebarApartmentOptions = safeApartmentOptions.slice(0, 3);
+  const compareApartmentOptions = safeApartmentOptions.filter((apartment) => apartment.id !== selectedApartment?.id).slice(0, 5);
   const summaryItems = useMemo(() => getFeatureSummaryItems(compareSummary), [compareSummary]);
   const displayMarkers = useMemo(() => getDisplayMarkers(features, currentZoom), [features, currentZoom]);
   const conditionCandidates = useMemo(() => {

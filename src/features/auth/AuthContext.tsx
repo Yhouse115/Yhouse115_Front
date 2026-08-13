@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
 
-import { supabase } from '../../lib/supabaseClient';
+import { isSupabaseConfigured, supabase } from '../../lib/supabaseClient';
 import { logger } from '../../services/logger';
 import { AuthContext, type AuthContextValue } from './context';
 
@@ -10,6 +10,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    if (!isSupabaseConfigured) {
+      setIsLoading(false);
+      return;
+    }
+
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
       setIsLoading(false);
@@ -27,6 +32,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       session,
       isLoading,
       signInWithGoogle: async () => {
+        if (!isSupabaseConfigured) {
+          logger.warn('supabase_not_configured', { action: 'signInWithGoogle' });
+          return;
+        }
         const { error } = await supabase.auth.signInWithOAuth({
           provider: 'google',
           options: { redirectTo: window.location.origin },
@@ -36,6 +45,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       },
       signOut: async () => {
+        if (!isSupabaseConfigured) {
+          logger.warn('supabase_not_configured', { action: 'signOut' });
+          return;
+        }
         const { error } = await supabase.auth.signOut();
         if (error) {
           logger.error('sign_out_failed', { message: error.message });

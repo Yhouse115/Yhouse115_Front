@@ -23,9 +23,24 @@ describe('App', () => {
     window.history.pushState({}, '', '/');
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => healthResponse,
+      vi.fn().mockImplementation((url: string) => {
+        if (typeof url === 'string' && (url.includes('/api/v1/family-map') || url.includes('/api/v1/apartments') || url.includes('/api/apartments'))) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              items: [
+                { id: '1', name: '목동신시가지 7단지 아파트', latitude: 37.525, longitude: 126.872 },
+                { id: '2', name: '목동신시가지 1단지 아파트', latitude: 37.530, longitude: 126.875 },
+                { id: '3', name: '목동신시가지 2단지 아파트', latitude: 37.528, longitude: 126.874 },
+                { id: '4', name: '목동신시가지 13단지 아파트', latitude: 37.518, longitude: 126.868 },
+              ],
+            }),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => healthResponse,
+        });
       }),
     );
   });

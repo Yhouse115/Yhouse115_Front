@@ -107,8 +107,11 @@ export async function searchApartments(query: string, limit = 10) {
   if (query.trim()) {
     params.set('q', query.trim());
   }
-  const response = await getJson<ApartmentSearchResponse>('/api/v1/family-map/apartments', params);
-  return response.items;
+  const response = await getJson<ApartmentSearchResponse | ApartmentSummary[]>('/api/v1/family-map/apartments', params);
+  if (Array.isArray(response)) {
+    return response;
+  }
+  return response?.items ?? [];
 }
 
 export async function getNearbyFeatures(
