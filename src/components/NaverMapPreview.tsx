@@ -5,8 +5,10 @@ import { LoginButton } from '../features/auth/LoginButton';
 import waezipHomeMarker from '../assets/waezip-home-marker.png';
 import waezipLogo from '../assets/waezip-logo.png';
 import {
+  compareApartments,
   getNearbyFeatures,
   searchApartments,
+  type ApartmentCompareResponse,
   type ApartmentSummary,
   type FacilityCategory,
   type FeatureSummary,
@@ -83,11 +85,22 @@ type ApartmentDisplayMarker = {
   count: number;
   apartments: ApartmentSummary[];
 };
+type ComparisonFeatureSet = {
+  apartmentId: string;
+  features: MapFeature[];
+};
 
 const facilityCategoryKeys: ActiveFacilityKey[] = ['kids', 'school', 'crosswalk', 'signal', 'cctv', 'risk'];
 const conditionFacilityCategoryKeys: FacilityCategory[] = ['school', 'kids', 'park', 'hospital', 'crosswalk', 'signal', 'cctv'];
 const defaultActiveFilters: ActiveFacilityKey[] = ['kids', 'school'];
 const nearbyRadiusM = 1000;
+const compareMetricOrder: ActiveFacilityKey[] = ['kids', 'school', 'crosswalk', 'signal', 'cctv', 'risk'];
+const compareSectionLabels: Record<string, string> = {
+  education: '교육·돌봄',
+  walking: '보행 안전',
+  safety: '생활 안전',
+  overall: '종합',
+};
 function getSavedConditionState() {
   try {
     const saved = window.sessionStorage.getItem('whyhouse:condition-map');
@@ -276,6 +289,18 @@ function getApartmentMarkerIcon(marker: ApartmentDisplayMarker) {
       </button>
     `,
     anchor: window.naver ? new window.naver.maps.Point(21, 44) : undefined,
+  };
+}
+
+function getComparisonApartmentMarkerIcon(apartment: ApartmentSummary, index: number) {
+  return {
+    content: `
+      <button class="comparison-apartment-pin" type="button" aria-label="${escapeHtml(apartment.name)} 비교 아파트">
+        <span aria-hidden="true">🏢</span>
+        <b>${index + 1}</b>
+      </button>
+    `,
+    anchor: window.naver ? new window.naver.maps.Point(26, 52) : undefined,
   };
 }
 
@@ -522,6 +547,7 @@ export function NaverMapPreview({
   const apartmentMarkerRef = useRef<MarkerInstance | null>(null);
   const apartmentSelectionZoomRef = useRef<number | null>(null);
   const apartmentOptionMarkerRefs = useRef<MarkerInstance[]>([]);
+  const comparisonApartmentMarkerRefs = useRef<MarkerInstance[]>([]);
   const facilityMarkerRefs = useRef<Array<{ marker: MarkerInstance; item: DisplayMarker }>>([]);
   const conditionMarkerRefs = useRef<MarkerInstance[]>([]);
   const savedDestinationIdRef = useRef(getSavedConditionState()?.destinationId);
@@ -538,8 +564,15 @@ export function NaverMapPreview({
   const [activeFilters, setActiveFilters] = useState<ActiveFacilityKey[]>(defaultActiveFilters);
   const [animatedFilter, setAnimatedFilter] = useState<FacilityKey | null>(null);
   const [selectedFacility, setSelectedFacility] = useState<MapFeature | null>(null);
+  const [previewApartment, setPreviewApartment] = useState<ApartmentSummary | null>(null);
   const [compareSummary, setCompareSummary] = useState<FeatureSummary[]>([]);
-  const [compareTarget, setCompareTarget] = useState<string>('');
+  const [comparisonApartments, setComparisonApartments] = useState<ApartmentSummary[]>([]);
+  const [comparisonSelectMode, setComparisonSelectMode] = useState(false);
+  const [compareResultOpen, setCompareResultOpen] = useState(false);
+  const [compareResult, setCompareResult] = useState<ApartmentCompareResponse | null>(null);
+  const [compareResultStatus, setCompareResultStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [comparisonFeatureSets, setComparisonFeatureSets] = useState<ComparisonFeatureSet[]>([]);
+  const [mapEvidenceMetric, setMapEvidenceMetric] = useState<ActiveFacilityKey | null>(null);
   const [currentZoom, setCurrentZoom] = useState(14);
   const [mapView, setMapView] = useState<MapView>('life');
   const [conditionStep, setConditionStep] = useState<'select' | 'route'>('select');
@@ -549,29 +582,63 @@ export function NaverMapPreview({
   const [destinationMenuOpen, setDestinationMenuOpen] = useState(false);
 
   const activeCategories = useMemo(() => getActiveCategories(activeFilters), [activeFilters]);
+  const evidenceFeatures = useMemo(() => {
+    if (!mapEvidenceMetric) {
+      return conditionFeatures;
+    }
+    return [
+      ...conditionFeatures,
+      ...comparisonFeatureSets.flatMap((set) => set.features),
+    ];
+  }, [comparisonFeatureSets, conditionFeatures, mapEvidenceMetric]);
   const features = useMemo(
-    () => conditionFeatures.filter((feature) => activeCategories.includes(feature.category)),
-    [activeCategories, conditionFeatures],
+    () => evidenceFeatures.filter((feature) => activeCategories.includes(feature.category)),
+    [activeCategories, evidenceFeatures],
   );
   const summary = useMemo(
     () => compareSummary.filter((item) => activeCategories.includes(item.category)),
     [activeCategories, compareSummary],
   );
   const topApartmentSuggestions = useMemo(
-    () => filterApartmentSuggestions(apartmentOptions, searchTerm, 12),
-    [apartmentOptions, searchTerm],
+    () => filterApartmentSuggestions(
+      comparisonSelectMode
+        ? apartmentOptions.filter((apartment) =>
+          apartment.id !== selectedApartment?.id
+          && !comparisonApartments.some((target) => target.id === apartment.id),
+        )
+        : apartmentOptions,
+      searchTerm,
+      12,
+    ),
+    [apartmentOptions, comparisonApartments, comparisonSelectMode, searchTerm, selectedApartment],
   );
   const sidebarApartmentSuggestions = useMemo(
-    () => filterApartmentSuggestions(apartmentOptions, searchTerm, 12),
-    [apartmentOptions, searchTerm],
+    () => filterApartmentSuggestions(
+      comparisonSelectMode
+        ? apartmentOptions.filter((apartment) =>
+          apartment.id !== selectedApartment?.id
+          && !comparisonApartments.some((target) => target.id === apartment.id),
+        )
+        : apartmentOptions,
+      searchTerm,
+      12,
+    ),
+    [apartmentOptions, comparisonApartments, comparisonSelectMode, searchTerm, selectedApartment],
   );
-  const safeApartmentOptions = apartmentOptions ?? [];
-  const compareApartmentOptions = safeApartmentOptions.filter((apartment) => apartment.id !== selectedApartment?.id).slice(0, 5);
+  const apartmentMarkerOptions = useMemo(
+    () => comparisonSelectMode
+      ? apartmentOptions.filter((apartment) =>
+        apartment.id !== selectedApartment?.id
+        && !comparisonApartments.some((target) => target.id === apartment.id),
+      )
+      : apartmentOptions,
+    [apartmentOptions, comparisonApartments, comparisonSelectMode, selectedApartment],
+  );
   const summaryItems = useMemo(() => getFeatureSummaryItems(compareSummary), [compareSummary]);
   const displayMarkers = useMemo(() => getDisplayMarkers(features, currentZoom), [features, currentZoom]);
   const apartmentDisplayMarkers = useMemo(
-    () => getApartmentDisplayMarkers(apartmentOptions, currentZoom),
-    [apartmentOptions, currentZoom],
+    () => getApartmentDisplayMarkers(apartmentMarkerOptions, currentZoom),
+    [apartmentMarkerOptions, currentZoom],
   );
   const conditionCandidates = useMemo(() => {
     if (!selectedApartment) return [];
@@ -643,6 +710,7 @@ export function NaverMapPreview({
         });
         window.naver.maps.Event.addListener(map, 'click', () => {
           setSelectedFacility(null);
+          setPreviewApartment(null);
         });
         setStatus('ready');
       })
@@ -667,7 +735,6 @@ export function NaverMapPreview({
         }
         setApartmentOptions(items);
         defaultApartmentOptionsRef.current = items;
-        setCompareTarget(items[1]?.id ?? items[0]?.id ?? '');
         setDataStatus('idle');
       })
       .catch(() => {
@@ -714,7 +781,7 @@ export function NaverMapPreview({
     apartmentOptionMarkerRefs.current.forEach((marker) => marker.setMap(null));
     apartmentOptionMarkerRefs.current = [];
 
-    if (!map || !window.naver?.maps || selectedApartment) {
+    if (!map || !window.naver?.maps || (selectedApartment && !comparisonSelectMode)) {
       return;
     }
 
@@ -728,7 +795,7 @@ export function NaverMapPreview({
       });
       window.naver!.maps.Event.addListener(marker, 'click', () => {
         if (item.count === 1) {
-          selectApartment(item.apartments[0]);
+          previewApartmentOnMap(item.apartments[0], comparisonSelectMode ? 'compare' : 'base');
           return;
         }
 
@@ -742,7 +809,7 @@ export function NaverMapPreview({
       apartmentOptionMarkerRefs.current.forEach((marker) => marker.setMap(null));
       apartmentOptionMarkerRefs.current = [];
     };
-  }, [apartmentDisplayMarkers, currentZoom, selectedApartment, status]);
+  }, [apartmentDisplayMarkers, comparisonSelectMode, currentZoom, selectedApartment, status]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -773,6 +840,8 @@ export function NaverMapPreview({
     if (!selectedApartment) {
       setCompareSummary([]);
       setConditionFeatures([]);
+      setComparisonFeatureSets([]);
+      setMapEvidenceMetric(null);
       setDataStatus('idle');
       return;
     }
@@ -799,6 +868,71 @@ export function NaverMapPreview({
       cancelled = true;
     };
   }, [selectedApartment?.id]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    comparisonApartmentMarkerRefs.current.forEach((marker) => marker.setMap(null));
+    comparisonApartmentMarkerRefs.current = [];
+
+    if (!map || !window.naver?.maps || mapView !== 'life' || comparisonApartments.length === 0) {
+      return;
+    }
+
+    comparisonApartmentMarkerRefs.current = comparisonApartments.map((apartment, index) => {
+      const marker = new window.naver!.maps.Marker({
+        position: new window.naver!.maps.LatLng(apartment.latitude, apartment.longitude),
+        map,
+        title: apartment.name,
+        icon: getComparisonApartmentMarkerIcon(apartment, index),
+        zIndex: 9000 + index,
+      });
+      window.naver!.maps.Event.addListener(marker, 'click', (event?: { stop?: () => void }) => {
+        event?.stop?.();
+        previewApartmentOnMap(apartment, 'compare');
+      });
+      return marker;
+    });
+
+    return () => {
+      comparisonApartmentMarkerRefs.current.forEach((marker) => marker.setMap(null));
+      comparisonApartmentMarkerRefs.current = [];
+    };
+  }, [comparisonApartments, mapView, status]);
+
+  useEffect(() => {
+    if (!mapEvidenceMetric || comparisonApartments.length === 0) {
+      setComparisonFeatureSets([]);
+      return;
+    }
+
+    let cancelled = false;
+    setDataStatus('loading');
+    Promise.all(
+      comparisonApartments.map((apartment) =>
+        getNearbyFeatures(apartment.id, [mapEvidenceMetric], nearbyRadiusM)
+          .then((result) => ({
+            apartmentId: apartment.id,
+            features: result.features,
+          })),
+      ),
+    )
+      .then((sets) => {
+        if (!cancelled) {
+          setComparisonFeatureSets(sets);
+          setDataStatus('idle');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setComparisonFeatureSets([]);
+          setDataStatus('error');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [comparisonApartments, mapEvidenceMetric]);
 
   useEffect(() => {
     if (!conditionCandidates.length || selectedDestination) return;
@@ -901,8 +1035,15 @@ export function NaverMapPreview({
     setSelectedApartment(apartment);
     setSidebarOpen(false);
     setSelectedFacility(null);
+    setPreviewApartment(null);
+    setComparisonSelectMode(false);
     setSelectedDestination(null);
     setConditionStep('select');
+    setComparisonApartments((current) => current.filter((target) => target.id !== apartment.id));
+    setCompareResult(null);
+    setCompareResultOpen(false);
+    setComparisonFeatureSets([]);
+    setMapEvidenceMetric(null);
 
     const map = mapRef.current;
     if (window.naver?.maps && map) {
@@ -939,10 +1080,17 @@ export function NaverMapPreview({
   function deselectApartment() {
     setSelectedApartment(null);
     setSelectedFacility(null);
+    setPreviewApartment(null);
+    setComparisonSelectMode(false);
     setSelectedDestination(null);
     setConditionStep('select');
     setCompareSummary([]);
     setConditionFeatures([]);
+    setComparisonApartments([]);
+    setCompareResult(null);
+    setCompareResultOpen(false);
+    setComparisonFeatureSets([]);
+    setMapEvidenceMetric(null);
     apartmentMarkerRef.current?.setMap(null);
 
     const map = mapRef.current;
@@ -977,6 +1125,9 @@ export function NaverMapPreview({
   function openSidebar() {
     setSidebarOpen(true);
     setSelectedFacility(null);
+    setPreviewApartment(null);
+    setComparisonSelectMode(false);
+    setMapEvidenceMetric(null);
   }
 
   function resetToApartmentSelectionMap() {
@@ -985,6 +1136,89 @@ export function NaverMapPreview({
     setTopSearchOpen(false);
     setApartmentOptions(defaultApartmentOptionsRef.current);
     deselectApartment();
+  }
+
+  function previewApartmentOnMap(apartment: ApartmentSummary, mode: 'base' | 'compare' = comparisonSelectMode ? 'compare' : 'base') {
+    setPreviewApartment(apartment);
+    setSelectedFacility(null);
+    if (mode === 'compare') {
+      setComparisonSelectMode(true);
+    }
+  }
+
+  function addComparisonApartment(apartment: ApartmentSummary) {
+    if (selectedApartment?.id === apartment.id) {
+      return;
+    }
+
+    setComparisonApartments((current) => {
+      if (current.some((target) => target.id === apartment.id) || current.length >= 2) {
+        return current;
+      }
+      return [...current, apartment];
+    });
+    setComparisonSelectMode(false);
+    setPreviewApartment(null);
+    setCompareResult(null);
+    setCompareResultOpen(false);
+    setComparisonFeatureSets([]);
+    setMapEvidenceMetric(null);
+  }
+
+  function removeComparisonApartment(apartmentId: string) {
+    setComparisonApartments((current) => current.filter((target) => target.id !== apartmentId));
+    setCompareResult(null);
+    setCompareResultOpen(false);
+    setComparisonFeatureSets((current) => current.filter((set) => set.apartmentId !== apartmentId));
+    setMapEvidenceMetric(null);
+  }
+
+  function startComparisonSelection() {
+    if (!selectedApartment || comparisonApartments.length >= 2) {
+      return;
+    }
+    setComparisonSelectMode(true);
+    setSidebarOpen(true);
+    setSelectedFacility(null);
+    setPreviewApartment(null);
+    setSearchTerm('');
+    setMapEvidenceMetric(null);
+  }
+
+  async function openCompareResult() {
+    if (!selectedApartment || comparisonApartments.length === 0) {
+      return;
+    }
+    setCompareResultOpen(true);
+    setCompareResultStatus('loading');
+    try {
+      const result = await compareApartments(
+        selectedApartment.id,
+        comparisonApartments.map((apartment) => apartment.id),
+        nearbyRadiusM,
+      );
+      setCompareResult(result);
+      setCompareResultStatus('idle');
+    } catch {
+      setCompareResult(null);
+      setCompareResultStatus('error');
+    }
+  }
+
+  function focusMetricOnMap(metricCode: FacilityCategory) {
+    if (!facilityCategoryKeys.includes(metricCode as ActiveFacilityKey)) {
+      return;
+    }
+    setMapView('life');
+    setSidebarOpen(false);
+    setCompareResultOpen(false);
+    setActiveFilters([metricCode as ActiveFacilityKey]);
+    setMapEvidenceMetric(metricCode as ActiveFacilityKey);
+    setComparisonSelectMode(false);
+    setPreviewApartment(null);
+    setSelectedFacility(null);
+    setAnimatedFilter(metricCode as FacilityKey);
+    window.setTimeout(() => setAnimatedFilter(null), 420);
   }
 
   function changeFilter(nextFilter: FacilityKey) {
@@ -1001,6 +1235,7 @@ export function NaverMapPreview({
     }
     setAnimatedFilter(nextFilter);
     setSelectedFacility(null);
+    setMapEvidenceMetric(null);
     window.setTimeout(() => setAnimatedFilter(null), 420);
   }
 
@@ -1008,11 +1243,16 @@ export function NaverMapPreview({
     setActiveFilters(defaultActiveFilters);
     setAnimatedFilter('all');
     setSelectedFacility(null);
+    setMapEvidenceMetric(null);
     window.setTimeout(() => setAnimatedFilter(null), 420);
   }
 
   function selectSuggestion(apartment: ApartmentSummary) {
-    selectApartment(apartment);
+    if (comparisonSelectMode && selectedApartment) {
+      previewApartmentOnMap(apartment, 'compare');
+    } else {
+      selectApartment(apartment);
+    }
     setSearchTerm('');
     setTopSearchOpen(false);
   }
@@ -1093,8 +1333,12 @@ export function NaverMapPreview({
           <div className="sidebar-head">
             <span aria-hidden="true">🏢</span>
             <div>
-              <b>아파트를 먼저 선택하세요</b>
-              <small>선택한 아파트가 지도의 기준점이 됩니다.</small>
+              <b>{comparisonSelectMode ? '비교할 아파트를 선택하세요' : '아파트를 먼저 선택하세요'}</b>
+              <small>
+                {comparisonSelectMode
+                  ? '기준 아파트와 비교할 단지를 검색하거나 지도에서 선택하세요.'
+                  : '선택한 아파트가 지도의 기준점이 됩니다.'}
+              </small>
             </div>
           </div>
 
@@ -1105,12 +1349,12 @@ export function NaverMapPreview({
               selectFromSearch(searchTerm);
             }}
           >
-            <input
-              aria-label="사이드바 아파트 검색"
-              onChange={(event) => setSearchTerm(event.target.value)}
-              placeholder="아파트 이름을 입력하세요"
-              value={searchTerm}
-            />
+              <input
+                aria-label="사이드바 아파트 검색"
+                onChange={(event) => setSearchTerm(event.target.value)}
+                placeholder={comparisonSelectMode ? '비교할 아파트 이름을 입력하세요' : '아파트 이름을 입력하세요'}
+                value={searchTerm}
+              />
             <button type="submit">검색</button>
             {sidebarApartmentSuggestions.length > 0 && (
               <div className="apartment-suggestions" role="listbox">
@@ -1126,31 +1370,143 @@ export function NaverMapPreview({
           </form>
 
           <section className="sidebar-compare" aria-label="아파트 비교">
-            <h3>아파트 비교</h3>
-            <b>{selectedApartment?.name ?? '기준 아파트 미선택'}</b>
-            <small className="compare-radius-note">선택 아파트 1km 이내 기준</small>
-            <select
-              aria-label="비교 아파트 선택"
-              onChange={(event) => setCompareTarget(event.target.value)}
-              value={compareTarget}
-            >
-              <option value="">비교 아파트 선택</option>
-              {compareApartmentOptions.map((apartment) => (
-                <option key={apartment.id} value={apartment.id}>
-                  {apartment.name}
-                </option>
+            <div className="compare-title-row">
+              <h3>아파트 비교</h3>
+              <span>{comparisonApartments.length} / 2</span>
+            </div>
+            <div className="compare-basket">
+              <div className="compare-basket-item compare-basket-item--base">
+                <small>기준</small>
+                <b>{selectedApartment?.name ?? '기준 아파트 미선택'}</b>
+              </div>
+              {comparisonApartments.map((apartment, index) => (
+                <div className="compare-basket-item" key={apartment.id}>
+                  <small>{index + 1}</small>
+                  <b>{apartment.name}</b>
+                  <button aria-label={`${apartment.name} 비교함에서 빼기`} onClick={() => removeComparisonApartment(apartment.id)} type="button">×</button>
+                </div>
               ))}
-            </select>
+            </div>
+            <small className="compare-radius-note">선택 아파트 1km 이내 기준</small>
+            <button
+              className="compare-add-button"
+              disabled={!selectedApartment || comparisonApartments.length >= 2}
+              onClick={startComparisonSelection}
+              type="button"
+            >
+              {comparisonApartments.length >= 2 ? '최대 2개까지 비교 가능' : '+ 비교 단지 추가'}
+            </button>
+            {comparisonSelectMode && comparisonApartments.length < 2 && (
+              <div className="compare-selection-note" role="status">
+                처음 아파트를 고를 때처럼 검색 결과나 지도 위 단지 마커를 눌러 비교 후보를 확인하세요.
+              </div>
+            )}
             <div className="facts">
               {summaryItems.map((item) => (
                 <div className="fact" key={item.key}>
                   <small>{item.label}</small>
                   <b>{item.value}</b>
-                  <span>{compareTarget ? '비교 준비 중' : '1km 이내'}</span>
+                  <span>{comparisonApartments.length > 0 ? '비교 준비 중' : '1km 이내'}</span>
                 </div>
               ))}
             </div>
+            <button className="compare-result-button" disabled={comparisonApartments.length === 0} onClick={openCompareResult} type="button">비교 결과 보기</button>
           </section>
+
+          {compareResultOpen && selectedApartment && (
+            <aside className="compare-result-panel" aria-label="아파트 비교 결과" role="complementary">
+              <div className="compare-result-head">
+                <div>
+                  <small>선택 아파트 {nearbyRadiusM / 1000}km 이내 기준</small>
+                  <h2>아파트 비교 결과</h2>
+                </div>
+                <button aria-label="비교 결과 닫기" onClick={() => setCompareResultOpen(false)} type="button">×</button>
+              </div>
+
+              {compareResultStatus === 'loading' && (
+                <div className="compare-result-message">비교 결과를 계산하는 중입니다.</div>
+              )}
+
+              {compareResultStatus === 'error' && (
+                <div className="compare-result-message compare-result-message--error">
+                  비교 결과를 불러오지 못했습니다. 백엔드 연결 상태를 확인해주세요.
+                </div>
+              )}
+
+              {compareResult && compareResultStatus === 'idle' && (
+                <>
+                  <section className="compare-result-summary">
+                    <dl>
+                      <div>
+                        <dt>기준 아파트</dt>
+                        <dd>{compareResult.base.name}</dd>
+                      </div>
+                      <div>
+                        <dt>비교 아파트</dt>
+                        <dd>{compareResult.targets.map((target) => target.apartment.name).join(', ')}</dd>
+                      </div>
+                    </dl>
+                    {compareResult.summary.map((item) => (
+                      <p key={item}>{item}</p>
+                    ))}
+                  </section>
+
+                  <section className="compare-result-section">
+                    <h3>핵심 지표 비교</h3>
+                    <div className="compare-metric-table">
+                      <div className="compare-metric-row compare-metric-row--head">
+                        <span>비교 기준</span>
+                        <span>{compareResult.base.name}</span>
+                        {compareResult.targets.map((target) => (
+                          <span key={target.apartment.id}>{target.apartment.name}</span>
+                        ))}
+                      </div>
+                      {compareResult.metrics
+                        .filter((metric) => compareMetricOrder.includes(metric.code as ActiveFacilityKey))
+                        .map((metric) => (
+                          <div className="compare-metric-row" key={metric.code}>
+                            <span>{metric.label}</span>
+                            <b>{metric.base_count}{metric.unit}</b>
+                            {metric.targets.map((target) => (
+                              <div className={`metric-target metric-target--${target.tone}`} key={target.apartment_id}>
+                                <b>{target.count}{metric.unit}</b>
+                                <small>{target.label}</small>
+                              </div>
+                            ))}
+                          </div>
+                        ))}
+                    </div>
+                  </section>
+
+                  <section className="compare-result-section">
+                    <h3>항목별 상세 비교</h3>
+                    <div className="compare-insight-list">
+                      {compareResult.targets.flatMap((target) =>
+                        target.insights.map((insight) => (
+                          <article className={`compare-insight compare-insight--${insight.tone}`} key={`${target.apartment.id}-${insight.category}-${insight.title}`}>
+                            <small>{target.apartment.name} · {compareSectionLabels[insight.category] ?? insight.category}</small>
+                            <b>{insight.title}</b>
+                            <p>{insight.description}</p>
+                          </article>
+                        )),
+                      )}
+                    </div>
+                  </section>
+
+                  <section className="compare-result-section">
+                    <h3>지도 근거 보기</h3>
+                    <div className="compare-map-actions">
+                      {compareMetricOrder.map((metricCode) => (
+                        <button key={metricCode} onClick={() => focusMetricOnMap(metricCode)} type="button">
+                          {facilityFilters.find((filter) => filter.key === metricCode)?.icon} {getFeatureLabel(metricCode)} 보기
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                </>
+              )}
+            </aside>
+          )}
 
           <section className="sidebar-memo">
             <h3>비교 분석 메모</h3>
@@ -1181,9 +1537,15 @@ export function NaverMapPreview({
                 <div>
                   <b>무엇을 지도에서 볼까요?</b>
                   <p className="apartment-mini-summary">
-                    <span>어린이시설 {getSummaryCount(summary, 'kids')}곳</span>
-                    <span>학교 {getSummaryCount(summary, 'school')}곳</span>
-                    <span>보행신호 {getSummaryCount(summary, 'signal')}개</span>
+                    {mapEvidenceMetric ? (
+                      <span>비교 근거: {getFeatureLabel(mapEvidenceMetric)} · 기준/비교 아파트 1km 이내</span>
+                    ) : (
+                      <>
+                        <span>어린이시설 {getSummaryCount(summary, 'kids')}곳</span>
+                        <span>학교 {getSummaryCount(summary, 'school')}곳</span>
+                        <span>보행신호 {getSummaryCount(summary, 'signal')}개</span>
+                      </>
+                    )}
                   </p>
                 </div>
                 <button onClick={resetToApartmentSelectionMap} type="button">🏢 아파트 다시 선택</button>
@@ -1281,6 +1643,42 @@ export function NaverMapPreview({
               <span>{selectedApartment.address}</span>
               <em>이 아파트 주변을 살펴보고 있어요</em>
             </div>
+          )}
+
+          {previewApartment && !selectedApartment && (
+            <aside className="map-apartment-preview-card" aria-label="아파트 미리보기">
+              <small>기준 아파트 후보</small>
+              <b>{previewApartment.name}</b>
+              <span>{previewApartment.address}</span>
+              <div className="apartment-preview-actions">
+                <button onClick={onOpenInvestment} type="button">단지 자세히 보기</button>
+                <button onClick={() => selectApartment(previewApartment)} type="button">기준 아파트로 선택</button>
+              </div>
+            </aside>
+          )}
+
+          {previewApartment && selectedApartment && previewApartment.id !== selectedApartment.id && (
+            <aside className="map-apartment-preview-card" aria-label="아파트 미리보기">
+              <small>비교 아파트 후보</small>
+              <b>{previewApartment.name}</b>
+              <span>{previewApartment.address}</span>
+              <em>{Math.round(distanceMeters(selectedApartment.latitude, selectedApartment.longitude, previewApartment.latitude, previewApartment.longitude))}m 거리</em>
+              <div className="apartment-preview-facts">
+                <span>어린이시설 {getSummaryCount(compareSummary, 'kids')}곳</span>
+                <span>학교 {getSummaryCount(compareSummary, 'school')}곳</span>
+                <span>보행신호 {getSummaryCount(compareSummary, 'signal')}개</span>
+              </div>
+              <div className="apartment-preview-actions">
+                <button onClick={onOpenInvestment} type="button">단지 자세히 보기</button>
+                {comparisonApartments.some((apartment) => apartment.id === previewApartment.id) ? (
+                  <button onClick={() => removeComparisonApartment(previewApartment.id)} type="button">비교함에서 빼기</button>
+                ) : (
+                  <button disabled={comparisonApartments.length >= 2} onClick={() => addComparisonApartment(previewApartment)} type="button">
+                    {comparisonApartments.length >= 2 ? '최대 2개까지 비교 가능' : '비교함에 담기'}
+                  </button>
+                )}
+              </div>
+            </aside>
           )}
 
           {selectedFacility && (
