@@ -92,6 +92,8 @@ const facilityColors: Record<Exclude<FacilityKey, 'all'> | 'home', string> = {
   risk: '#FF5B66',
 };
 
+const clusterMergeDistancePx = 49;
+
 declare global {
   interface Window {
     naver?: {
@@ -178,15 +180,14 @@ function getMarkerIcon(label: string, color: string, variant: 'home' | 'facility
   };
 }
 
-function getClusterMarkerIcon(label: string, color: string, count: number) {
+function getClusterMarkerIcon(count: number) {
   return {
     content: `
-      <span class="map-cluster-pin" style="--pin-color: ${color}">
-        <b>${label}</b>
-        <em>${count}</em>
+      <span class="map-cluster-pin">
+        <b>${count}</b>
       </span>
     `,
-    anchor: window.naver ? new window.naver.maps.Point(24, 24) : undefined,
+    anchor: window.naver ? new window.naver.maps.Point(30, 30) : undefined,
   };
 }
 
@@ -240,24 +241,69 @@ function getFeatureSummaryItems(summary: FeatureSummary[]) {
 }
 
 function getClusterGridMeters(zoom: number) {
-  if (zoom <= 13) {
-    return 600;
-  }
-  if (zoom <= 14) {
-    return 360;
-  }
-  if (zoom <= 15) {
-    return 320;
-  }
-  if (zoom <= 16) {
-    return 160;
-  }
+  if (zoom <= 11) return 2000;
+  if (zoom <= 12) return 1000;
+  if (zoom <= 13) return 500;
+  if (zoom <= 14) return 250;
+  if (zoom <= 15) return 150;
+  if (zoom <= 16) return 100;
   return 0;
+}
+
+function projectMarkerToPixel(latitude: number, longitude: number, zoom: number) {
+  const sinLatitude = Math.sin((latitude * Math.PI) / 180);
+  const scale = 256 * 2 ** zoom;
+  return {
+    x: ((longitude + 180) / 360) * scale,
+    y: (0.5 - Math.log((1 + sinLatitude) / (1 - sinLatitude)) / (4 * Math.PI)) * scale,
+  };
+}
+
+function mergeClusterMarkersByOverlap(markers: DisplayMarker[], zoom: number) {
+  const merged: DisplayMarker[] = [];
+
+  for (const marker of markers) {
+    if (marker.count <= 1) {
+      merged.push(marker);
+      continue;
+    }
+
+    const markerPixel = projectMarkerToPixel(marker.latitude, marker.longitude, zoom);
+    const targetIndex = merged.findIndex((candidate) => {
+      if (candidate.count <= 1) {
+        return false;
+      }
+
+      const candidatePixel = projectMarkerToPixel(candidate.latitude, candidate.longitude, zoom);
+      const distance = Math.hypot(markerPixel.x - candidatePixel.x, markerPixel.y - candidatePixel.y);
+      return distance <= clusterMergeDistancePx;
+    });
+
+    if (targetIndex === -1) {
+      merged.push(marker);
+      continue;
+    }
+
+    const target = merged[targetIndex];
+    const features = [...target.features, ...marker.features];
+    const count = target.count + marker.count;
+    merged[targetIndex] = {
+      ...target,
+      id: `${target.id}:${marker.id}`,
+      name: `${count}개 지점`,
+      latitude: (target.latitude * target.count + marker.latitude * marker.count) / count,
+      longitude: (target.longitude * target.count + marker.longitude * marker.count) / count,
+      count,
+      features,
+    };
+  }
+
+  return merged;
 }
 
 function getDisplayMarkers(features: MapFeature[], zoom: number): DisplayMarker[] {
   if (features.some((feature) => feature.source === 'cluster')) {
-    return features.filter((feature) => zoom < 17 || feature.source !== 'cluster').map((feature) => {
+    const markers = features.filter((feature) => zoom < 17 || feature.source !== 'cluster').map((feature) => {
       const count = typeof feature.metadata?.count === 'number' ? feature.metadata.count : 1;
       return {
         id: feature.id,
@@ -269,6 +315,7 @@ function getDisplayMarkers(features: MapFeature[], zoom: number): DisplayMarker[
         features: [feature],
       };
     });
+    return mergeClusterMarkersByOverlap(markers, zoom);
   }
 
   const gridMeters = getClusterGridMeters(zoom);
@@ -290,24 +337,25 @@ function getDisplayMarkers(features: MapFeature[], zoom: number): DisplayMarker[
     const lngGrid = gridMeters / (111320 * Math.cos((feature.latitude * Math.PI) / 180));
     const latKey = Math.round(feature.latitude / latGrid);
     const lngKey = Math.round(feature.longitude / lngGrid);
-    const key = `${feature.category}:${latKey}:${lngKey}`;
+    const key = `${latKey}:${lngKey}`;
     buckets.set(key, [...(buckets.get(key) ?? []), feature]);
   }
 
-  return Array.from(buckets.entries()).map(([key, bucket]) => {
+  const markers = Array.from(buckets.entries()).map(([key, bucket]) => {
     const latitude = bucket.reduce((sum, feature) => sum + feature.latitude, 0) / bucket.length;
     const longitude = bucket.reduce((sum, feature) => sum + feature.longitude, 0) / bucket.length;
     const category = bucket[0].category;
     return {
       id: key,
       category,
-      name: bucket.length > 1 ? `${getFeatureLabel(category)} ${bucket.length}개` : bucket[0].name,
+      name: bucket.length > 1 ? `${bucket.length}개 지점` : bucket[0].name,
       latitude,
       longitude,
       count: bucket.length,
       features: bucket,
     };
   });
+  return mergeClusterMarkersByOverlap(markers, zoom);
 }
 
 export function NaverMapPreview({
@@ -544,7 +592,7 @@ export function NaverMapPreview({
         title: item.name,
         icon:
           item.count > 1
-            ? getClusterMarkerIcon(iconLabel, facilityColors[item.category], item.count)
+            ? getClusterMarkerIcon(item.count)
             : getMarkerIcon(iconLabel, facilityColors[item.category], 'facility'),
         zIndex: item.count > 1 ? 80 : 40,
       });
