@@ -4,16 +4,17 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import frame01 from '../assets/intro-frame-01.png';
 import neighborhoodBase from '../assets/intro-neighborhood-base.png';
 import pointSprite from '../assets/intro-sprite-point.png';
+import waezipHomeMarker from '../assets/waezip-home-marker.png';
 import { INTRO_TIMING, MOTION } from './intro.constants';
 
 type WhyHouseIntroProps = { onComplete: () => void };
 
 const MARKERS = [
-  { id: 'apartment', label: '\uc120\ud0dd \uc544\ud30c\ud2b8' },
-  { id: 'school', label: '\ud559\uad50' },
-  { id: 'traffic', label: '\uc2e0\ud638\ub4f1' },
-  { id: 'market', label: '\ub9c8\ud2b8' },
-  { id: 'home', label: '\uc8fc\uac70' },
+  { id: 'apartment', label: '선택 아파트', color: '#5C9FD0' },
+  { id: 'school', label: '학교', color: '#F9CC19' },
+  { id: 'traffic', label: '신호등', color: '#A2D6F1' },
+  { id: 'market', label: '마트', color: '#1ABC9C' },
+  { id: 'home', label: '주거', color: '#A5D3A8' },
 ] as const;
 
 export function WhyHouseIntro({ onComplete }: WhyHouseIntroProps) {
@@ -103,10 +104,14 @@ export function WhyHouseIntro({ onComplete }: WhyHouseIntroProps) {
       <div className="wh-map-scene" aria-label="Neighborhood map">
         <img className="wh-map-background" src={neighborhoodBase} alt="" />
         <img className="wh-point-character" src={pointSprite} alt="" />
-        {MARKERS.map(({ id, label }) => (
-          <span className={`wh-map-marker wh-map-marker--${id}`} key={id}>
-            <i aria-hidden="true" />
-            <b>{label}</b>
+        {MARKERS.map(({ id, label, color }) => (
+          <span
+            className={`wh-map-marker wh-map-marker--${id}`}
+            key={id}
+            style={{ '--pin-color': color } as React.CSSProperties}
+          >
+            <img className="wh-map-marker-img" src={waezipHomeMarker} alt="" />
+            <b className="wh-map-marker-badge">{label}</b>
           </span>
         ))}
       </div>

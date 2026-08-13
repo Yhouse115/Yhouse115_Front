@@ -22,11 +22,14 @@ type ConditionDestination = {
   id: string;
   name: string;
   category: 'school' | 'childcare';
+  latitude: number;
+  longitude: number;
+  address?: string | null;
   minutes: number;
   distance: number;
   crosswalks: number;
   signals: number;
-  position: { left: string; top: string };
+  cctv: number;
 };
 
 type MapOptions = {
@@ -49,6 +52,8 @@ type MapInstance = {
     getNE: () => { lat: () => number; lng: () => number };
   };
 };
+
+type PolylineInstance = { setMap: (map: MapInstance | null) => void };
 
 type MarkerInstance = {
   setMap: (map: MapInstance | null) => void;
@@ -83,12 +88,6 @@ type DisplayMarker = {
 
 const facilityCategoryKeys: FacilityCategory[] = ['kids', 'school', 'crosswalk', 'signal', 'cctv', 'risk'];
 const defaultActiveFilters: ActiveFacilityKey[] = ['kids', 'school'];
-const conditionDestinations: ConditionDestination[] = [
-  { id: 'jeongmok', name: '정목초등학교', category: 'school', minutes: 7, distance: 520, crosswalks: 3, signals: 4, position: { left: '63%', top: '39%' } },
-  { id: 'yangjeong', name: '양정초등학교', category: 'school', minutes: 11, distance: 780, crosswalks: 5, signals: 3, position: { left: '50%', top: '27%' } },
-  { id: 'mokdong-kindergarten', name: '목동유치원', category: 'childcare', minutes: 9, distance: 640, crosswalks: 2, signals: 2, position: { left: '43%', top: '54%' } },
-];
-
 function getSavedConditionState() {
   try {
     const saved = window.sessionStorage.getItem('whyhouse:condition-map');
@@ -97,6 +96,28 @@ function getSavedConditionState() {
   } catch {
     return null;
   }
+}
+
+function distanceMeters(aLat: number, aLng: number, bLat: number, bLng: number) {
+  const rad = (value: number) => value * Math.PI / 180;
+  const dLat = rad(bLat - aLat);
+  const dLng = rad(bLng - aLng);
+  const value = Math.sin(dLat / 2) ** 2 + Math.cos(rad(aLat)) * Math.cos(rad(bLat)) * Math.sin(dLng / 2) ** 2;
+  return 6371000 * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
+}
+
+function distanceToRoute(feature: MapFeature, route: Array<{ latitude: number; longitude: number }>) {
+  return Math.min(...route.slice(0, -1).map((point, index) => {
+    const next = route[index + 1];
+    return Math.min(...Array.from({ length: 11 }, (_, sample) => {
+      const ratio = sample / 10;
+      return distanceMeters(feature.latitude, feature.longitude, point.latitude + (next.latitude - point.latitude) * ratio, point.longitude + (next.longitude - point.longitude) * ratio);
+    }));
+  }));
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character] ?? character);
 }
 
 const facilityFilters: Array<{ key: FacilityKey; label: string; icon: string }> = [
@@ -141,6 +162,14 @@ declare global {
           };
           zIndex?: number;
         }) => MarkerInstance;
+        Polyline: new (options: {
+          map?: MapInstance | null;
+          path: unknown[];
+          strokeColor: string;
+          strokeWeight: number;
+          strokeOpacity: number;
+          strokeStyle?: string;
+        }) => PolylineInstance;
         Event: NaverMapsEvent;
       };
     };
@@ -182,28 +211,19 @@ function loadNaverMaps(clientId: string): Promise<void> {
   return window.__whyhouseNaverMapLoading;
 }
 
-function getMarkerIcon(label: string, color: string, variant: 'home' | 'facility', imageUrl?: string) {
-  const size = variant === 'home' ? 58 : 38;
-  const radius = size / 2;
-
-  if (variant === 'home' && imageUrl) {
-    return {
-      content: `
-        <span class="map-character-pin" style="--pin-color: ${color}">
-          <img alt="${label}" src="${imageUrl}" />
-        </span>
-      `,
-      anchor: window.naver ? new window.naver.maps.Point(radius + 8, radius + 34) : undefined,
-    };
-  }
+function getMarkerIcon(label: string, color: string, variant: 'home' | 'facility', imageUrl: string = waezipHomeMarker) {
+  const isHome = variant === 'home';
+  const width = isHome ? 68 : 52;
+  const height = isHome ? 88 : 72;
 
   return {
     content: `
-      <span class="map-pin map-pin--${variant}" style="--pin-color: ${color}">
-        <b>${label}</b>
+      <span class="map-character-pin map-character-pin--${variant}" style="--pin-color: ${color}">
+        <img alt="${escapeHtml(label)}" src="${imageUrl}" />
+        <b class="map-character-pin-badge">${escapeHtml(label)}</b>
       </span>
     `,
-    anchor: window.naver ? new window.naver.maps.Point(radius, radius) : undefined,
+    anchor: window.naver ? new window.naver.maps.Point(width / 2, height - 6) : undefined,
   };
 }
 
@@ -396,6 +416,9 @@ export function NaverMapPreview({
   const mapRef = useRef<MapInstance | null>(null);
   const apartmentMarkerRef = useRef<MarkerInstance | null>(null);
   const facilityMarkerRefs = useRef<Array<{ marker: MarkerInstance; item: DisplayMarker }>>([]);
+  const conditionMarkerRefs = useRef<MarkerInstance[]>([]);
+  const conditionRouteRef = useRef<PolylineInstance | null>(null);
+  const savedDestinationIdRef = useRef(getSavedConditionState()?.destinationId);
   const featureRequestIdRef = useRef(0);
   const selectedApartmentRef = useRef<ApartmentSummary | null>(null);
   const activeCategoriesRef = useRef<FacilityCategory[]>([]);
@@ -420,11 +443,9 @@ export function NaverMapPreview({
   const [compareTarget, setCompareTarget] = useState<string>('');
   const [currentZoom, setCurrentZoom] = useState(15);
   const [mapView, setMapView] = useState<MapView>('life');
-  const [conditionStep, setConditionStep] = useState<'select' | 'route'>(() => getSavedConditionState()?.conditionStep ?? 'select');
-  const [selectedDestination, setSelectedDestination] = useState<ConditionDestination | null>(() => {
-    const destinationId = getSavedConditionState()?.destinationId;
-    return conditionDestinations.find((item) => item.id === destinationId) ?? null;
-  });
+  const [conditionStep, setConditionStep] = useState<'select' | 'route'>('select');
+  const [selectedDestination, setSelectedDestination] = useState<ConditionDestination | null>(null);
+  const [conditionFeatures, setConditionFeatures] = useState<MapFeature[]>([]);
   const [visibleConditionCategories, setVisibleConditionCategories] = useState<ConditionCategory[]>(() => getSavedConditionState()?.visibleCategories ?? ['school', 'park']);
   const [destinationMenuOpen, setDestinationMenuOpen] = useState(false);
 
@@ -441,6 +462,24 @@ export function NaverMapPreview({
   const compareApartmentOptions = apartmentOptions.filter((apartment) => apartment.id !== selectedApartment?.id).slice(0, 5);
   const summaryItems = useMemo(() => getFeatureSummaryItems(compareSummary), [compareSummary]);
   const displayMarkers = useMemo(() => getDisplayMarkers(features, currentZoom), [features, currentZoom]);
+  const conditionCandidates = useMemo(() => {
+    if (!selectedApartment) return [];
+    const candidates = conditionFeatures.filter((feature) => feature.category === 'school' || (feature.category === 'kids' && feature.source === 'childcare_centers'));
+    return candidates.map((feature) => {
+      const category = feature.category === 'school' ? 'school' as const : 'childcare' as const;
+      const directDistance = distanceMeters(selectedApartment.latitude, selectedApartment.longitude, feature.latitude, feature.longitude);
+      const route = [
+        { latitude: selectedApartment.latitude, longitude: selectedApartment.longitude },
+        { latitude: selectedApartment.latitude, longitude: feature.longitude },
+        { latitude: feature.latitude, longitude: feature.longitude },
+      ];
+      const routeDistance = distanceMeters(route[0].latitude, route[0].longitude, route[1].latitude, route[1].longitude) + distanceMeters(route[1].latitude, route[1].longitude, route[2].latitude, route[2].longitude);
+      const routeSignals = conditionFeatures.filter((item) => item.category === 'signal' && distanceToRoute(item, route) <= 45);
+      const routeCrosswalks = conditionFeatures.filter((item) => item.category === 'crosswalk' && distanceToRoute(item, route) <= 45 && !routeSignals.some((signal) => distanceMeters(item.latitude, item.longitude, signal.latitude, signal.longitude) <= 25));
+      const routeCctv = conditionFeatures.filter((item) => item.category === 'cctv' && distanceToRoute(item, route) <= 45);
+      return { id: feature.id, name: feature.name, category, latitude: feature.latitude, longitude: feature.longitude, address: feature.address, distance: Math.round(Math.max(directDistance, routeDistance)), minutes: Math.max(1, Math.ceil(Math.max(directDistance, routeDistance) / 75)), signals: routeSignals.length, crosswalks: routeCrosswalks.length, cctv: routeCctv.length };
+    }).sort((a, b) => a.distance - b.distance).slice(0, 12);
+  }, [conditionFeatures, selectedApartment]);
 
   useEffect(() => {
     selectedApartmentRef.current = selectedApartment;
@@ -608,11 +647,13 @@ export function NaverMapPreview({
       .then((result) => {
         if (!cancelled) {
           setCompareSummary(result.summary);
+          setConditionFeatures(result.features);
         }
       })
       .catch(() => {
         if (!cancelled) {
           setCompareSummary([]);
+          setConditionFeatures([]);
         }
       });
 
@@ -622,14 +663,29 @@ export function NaverMapPreview({
   }, [selectedApartment?.id]);
 
   useEffect(() => {
+    if (!conditionCandidates.length || selectedDestination) return;
+    const restored = conditionCandidates.find((item) => item.id === savedDestinationIdRef.current);
+    if (restored && getSavedConditionState()?.conditionStep === 'route') {
+      setSelectedDestination(restored);
+      setConditionStep('route');
+    }
+    savedDestinationIdRef.current = undefined;
+  }, [conditionCandidates, selectedDestination]);
+
+  useEffect(() => {
     const map = mapRef.current;
     if (!map || !window.naver?.maps) {
       return;
     }
 
     facilityMarkerRefs.current.forEach(({ marker }) => marker.setMap(null));
+    if (mapView === 'condition') {
+      facilityMarkerRefs.current = [];
+      return;
+    }
     facilityMarkerRefs.current = displayMarkers.map((item) => {
-      const iconLabel = facilityFilters.find((filter) => filter.key === item.category)?.icon ?? '•';
+      const filter = facilityFilters.find((f) => f.key === item.category);
+      const iconLabel = filter ? `${filter.icon} ${filter.label}` : item.name;
       const marker = new window.naver!.maps.Marker({
         position: new window.naver!.maps.LatLng(item.latitude, item.longitude),
         map,
@@ -637,7 +693,7 @@ export function NaverMapPreview({
         icon:
           item.count > 1
             ? getClusterMarkerIcon(item.count)
-            : getMarkerIcon(iconLabel, facilityColors[item.category], 'facility'),
+            : getMarkerIcon(iconLabel, facilityColors[item.category] ?? '#355b4e', 'facility', waezipHomeMarker),
         zIndex: item.count > 1 ? 80 : 40,
       });
       window.naver!.maps.Event.addListener(marker, 'click', (event?: { stop?: () => void }) => {
@@ -667,7 +723,53 @@ export function NaverMapPreview({
       facilityMarkerRefs.current.forEach(({ marker }) => marker.setMap(null));
       facilityMarkerRefs.current = [];
     };
-  }, [displayMarkers]);
+  }, [displayMarkers, mapView]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    conditionMarkerRefs.current.forEach((marker) => marker.setMap(null));
+    conditionMarkerRefs.current = [];
+    conditionRouteRef.current?.setMap(null);
+    conditionRouteRef.current = null;
+    if (mapView !== 'condition' || !map || !window.naver?.maps || !selectedApartment) return;
+
+    if (conditionStep === 'select') {
+      const visibleCandidates = conditionCandidates.filter((item) => visibleConditionCategories.includes(item.category));
+      conditionMarkerRefs.current = visibleCandidates.map((destination) => {
+        const marker = new window.naver!.maps.Marker({
+          position: new window.naver!.maps.LatLng(destination.latitude, destination.longitude),
+          map,
+          title: destination.name,
+          zIndex: 90,
+          icon: {
+            content: `<button class="condition-map-label" type="button"><span>${destination.category === 'school' ? '🏫' : '🧸'}</span><b>${escapeHtml(destination.name)}</b><small>도보 ${destination.minutes}분 · ${destination.distance}m</small></button>`,
+            anchor: new window.naver!.maps.Point(82, 28),
+          },
+        });
+        window.naver!.maps.Event.addListener(marker, 'click', () => selectDestination(destination));
+        return marker;
+      });
+    } else if (selectedDestination) {
+      const route = [
+        new window.naver.maps.LatLng(selectedApartment.latitude, selectedApartment.longitude),
+        new window.naver.maps.LatLng(selectedApartment.latitude, selectedDestination.longitude),
+        new window.naver.maps.LatLng(selectedDestination.latitude, selectedDestination.longitude),
+      ];
+      conditionRouteRef.current = new window.naver.maps.Polyline({ map, path: route, strokeColor: '#2f6fe4', strokeWeight: 7, strokeOpacity: 0.95, strokeStyle: 'solid' });
+      const destinationMarker = new window.naver.maps.Marker({
+        position: route[2], map, title: selectedDestination.name, zIndex: 100,
+        icon: { content: `<div class="condition-map-label condition-map-label--selected"><span>🏫</span><b>${escapeHtml(selectedDestination.name)}</b><small>${selectedDestination.distance}m</small></div>`, anchor: new window.naver.maps.Point(82, 28) },
+      });
+      conditionMarkerRefs.current = [destinationMarker];
+      map.setCenter?.(route[1]);
+    }
+    return () => {
+      conditionMarkerRefs.current.forEach((marker) => marker.setMap(null));
+      conditionMarkerRefs.current = [];
+      conditionRouteRef.current?.setMap(null);
+      conditionRouteRef.current = null;
+    };
+  }, [conditionCandidates, conditionStep, mapView, selectedApartment, selectedDestination, visibleConditionCategories]);
 
   useEffect(() => {
     if (!selectedApartment) {
@@ -1047,19 +1149,17 @@ export function NaverMapPreview({
               <aside className="condition-apartment-card">
                 <small>선택 단지</small><h2>{selectedApartment.name}</h2><p>{selectedApartment.address}</p>
                 <dl>
-                  {selectedDestination ? <><div><dt>통학 목적지</dt><dd>{selectedDestination.name}</dd></div><div><dt>도보 시간</dt><dd>{selectedDestination.minutes}분</dd></div><div><dt>횡단보도</dt><dd>{selectedDestination.crosswalks}개</dd></div><div><dt>보행신호</dt><dd>{selectedDestination.signals}개</dd></div></> : <><div><dt>현재 상태</dt><dd>목적지 선택 전</dd></div><div><dt>분석 기준</dt><dd>도보 경로</dd></div></>}
+                  {selectedDestination ? <><div><dt>통학 목적지</dt><dd>{selectedDestination.name}</dd></div><div><dt>도보 시간</dt><dd>{selectedDestination.minutes}분</dd></div><div><dt>횡단보도</dt><dd>{selectedDestination.crosswalks}개</dd></div><div><dt>보행신호</dt><dd>{selectedDestination.signals}개</dd></div><div><dt>CCTV</dt><dd>{selectedDestination.cctv}개</dd></div></> : <><div><dt>현재 상태</dt><dd>목적지 선택 전</dd></div><div><dt>분석 기준</dt><dd>실제 시설 좌표·큰길 경로</dd></div></>}
                 </dl>
                 <button onClick={onOpenInvestment} type="button">단지 상세 보기</button>
               </aside>
 
               <aside className="condition-control-card">
                 <div className="condition-control-title"><div><small>{conditionStep === 'route' ? '선택한 경로' : '목적지 탐색'}</small><h2>{conditionStep === 'route' ? '조건 분석' : '어디로 갈까요?'}</h2></div><button onClick={() => setDestinationMenuOpen((open) => !open)} type="button">✨</button></div>
-                {conditionStep === 'route' && selectedDestination ? <div className="condition-metrics"><div><span>🚶</span><small>도보 시간</small><b>{selectedDestination.minutes}분</b></div><div><span>🚸</span><small>횡단보도</small><b>{selectedDestination.crosswalks}개</b></div><div><span>🚦</span><small>보행신호</small><b>{selectedDestination.signals}개</b></div><button onClick={resetDestination} type="button">다른 목적지 선택</button></div> : <div className="condition-categories">{([['school','학교','🏫'],['park','공원','🌳'],['childcare','유치원·어린이집','🧸'],['hospital','병원','🏥']] as const).map(([key,label,icon]) => <button className={visibleConditionCategories.includes(key) ? 'is-active' : ''} key={key} onClick={() => toggleConditionCategory(key)} type="button"><span>{icon}</span>{label}<small>{visibleConditionCategories.includes(key) ? '표시 중' : '선택'}</small></button>)}</div>}
-                {destinationMenuOpen && <div className="destination-menu">{conditionDestinations.map((item) => <button key={item.id} onClick={() => selectDestination(item)} type="button"><span>{item.category === 'school' ? '🏫' : '🧸'} {item.name}</span><small>도보 {item.minutes}분</small></button>)}</div>}
+                {conditionStep === 'route' && selectedDestination ? <div className="condition-metrics"><div><span>🚶</span><small>도보 시간</small><b>{selectedDestination.minutes}분</b></div><div><span>🚸</span><small>횡단보도</small><b>{selectedDestination.crosswalks}개</b></div><div><span>🚦</span><small>보행신호</small><b>{selectedDestination.signals}개</b></div><div><span>📹</span><small>CCTV</small><b>{selectedDestination.cctv}개</b></div><button onClick={resetDestination} type="button">다른 목적지 선택</button></div> : <div className="condition-categories">{([['school','학교','🏫'],['park','공원','🌳'],['childcare','유치원·어린이집','🧸'],['hospital','병원','🏥']] as const).map(([key,label,icon]) => <button className={visibleConditionCategories.includes(key) ? 'is-active' : ''} key={key} onClick={() => toggleConditionCategory(key)} type="button"><span>{icon}</span>{label}<small>{visibleConditionCategories.includes(key) ? '표시 중' : '선택'}</small></button>)}</div>}
+                {destinationMenuOpen && <div className="destination-menu">{conditionCandidates.map((item) => <button key={item.id} onClick={() => selectDestination(item)} type="button"><span>{item.category === 'school' ? '🏫' : '🧸'} {item.name}</span><small>도보 {item.minutes}분 · {item.distance}m</small></button>)}</div>}
               </aside>
-
-              {conditionStep === 'select' && <div className="condition-destinations">{conditionDestinations.filter((item) => visibleConditionCategories.includes(item.category)).map((item) => <button key={item.id} onClick={() => selectDestination(item)} style={item.position} type="button"><span>{item.category === 'school' ? '🏫' : '🧸'}</span><b>{item.name}</b><small>도보 {item.minutes}분</small></button>)}</div>}
-              {conditionStep === 'route' && selectedDestination && <div className="condition-route-layer" aria-label={`${selectedApartment.name}에서 ${selectedDestination.name}까지 보행 경로`}><svg viewBox="0 0 1000 700" preserveAspectRatio="none"><polyline points="390,555 440,520 455,445 525,405 565,330 650,285" /></svg><span className="route-marker route-marker--crosswalk" style={{left:'46%',top:'60%'}}>🚸</span><span className="route-marker route-marker--signal" style={{left:'53%',top:'49%'}}>🚦</span><span className="route-marker route-marker--signal" style={{left:'60%',top:'39%'}}>🚦</span><button className="route-destination" onClick={resetDestination} style={selectedDestination.position} type="button">🏫 {selectedDestination.name}</button></div>}
+              {conditionStep === 'select' && conditionCandidates.length === 0 && <div className="condition-empty">주변 학교·어린이집 정보를 불러오는 중입니다.</div>}
             </>
           )}
 
