@@ -70,6 +70,14 @@ export type WalkingRoute = {
   crosswalkCount?: number | null;
   pedestrianSignalCount?: number | null;
   cctvLocationCount?: number | null;
+  crossingEvents?: WalkingRouteCrossingEvent[] | null;
+};
+
+export type WalkingRouteCrossingEvent = {
+  crosswalkLinkId: string;
+  longitude: number;
+  latitude: number;
+  pedestrianSignals: Array<{ id: string; longitude: number; latitude: number }>;
 };
 
 export class ApiRequestError extends Error {
@@ -184,6 +192,27 @@ function isRouteCoordinate(value: unknown): value is [number, number] {
     && Number.isFinite(value[1]);
 }
 
+function isCrossingEvent(value: unknown): value is WalkingRouteCrossingEvent {
+  if (!value || typeof value !== 'object') return false;
+  const event = value as Partial<WalkingRouteCrossingEvent>;
+  return typeof event.crosswalkLinkId === 'string'
+    && event.crosswalkLinkId.length > 0
+    && typeof event.longitude === 'number'
+    && Number.isFinite(event.longitude)
+    && typeof event.latitude === 'number'
+    && Number.isFinite(event.latitude)
+    && Array.isArray(event.pedestrianSignals)
+    && event.pedestrianSignals.every((signal) => (
+      !!signal
+      && typeof signal.id === 'string'
+      && signal.id.length > 0
+      && typeof signal.longitude === 'number'
+      && Number.isFinite(signal.longitude)
+      && typeof signal.latitude === 'number'
+      && Number.isFinite(signal.latitude)
+    ));
+}
+
 function mapWalkingRoute(response: WalkingRoute): WalkingRoute {
   if (
     !Array.isArray(response.routeCoordinates)
@@ -195,6 +224,7 @@ function mapWalkingRoute(response: WalkingRoute): WalkingRoute {
     || (response.crosswalkCount != null && !Number.isFinite(response.crosswalkCount))
     || (response.pedestrianSignalCount != null && !Number.isFinite(response.pedestrianSignalCount))
     || (response.cctvLocationCount != null && !Number.isFinite(response.cctvLocationCount))
+    || (response.crossingEvents != null && (!Array.isArray(response.crossingEvents) || !response.crossingEvents.every(isCrossingEvent)))
   ) {
     throw new Error('Walking route response is invalid.');
   }
@@ -206,6 +236,7 @@ function mapWalkingRoute(response: WalkingRoute): WalkingRoute {
     crosswalkCount: response.crosswalkCount ?? null,
     pedestrianSignalCount: response.pedestrianSignalCount ?? null,
     cctvLocationCount: response.cctvLocationCount ?? null,
+    crossingEvents: response.crossingEvents ?? null,
   };
 }
 
