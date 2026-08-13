@@ -255,6 +255,18 @@ function getBubbleApartmentName(name: string) {
   return Array.from(name.replace(/\s+/g, '')).slice(0, 8).join('');
 }
 
+function getApartmentMarkerIcon(apartment: ApartmentSummary) {
+  return {
+    content: `
+      <button class="apartment-map-marker" type="button" aria-label="${escapeHtml(apartment.name)} 선택">
+        <span aria-hidden="true">🏢</span>
+        <b>${escapeHtml(getBubbleApartmentName(apartment.name))}</b>
+      </button>
+    `,
+    anchor: window.naver ? new window.naver.maps.Point(64, 22) : undefined,
+  };
+}
+
 function getFeatureLabel(category: FacilityCategory) {
   return facilityFilters.find((filter) => filter.key === category)?.label ?? category;
 }
@@ -425,6 +437,8 @@ export function NaverMapPreview({
   const mapElementRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapInstance | null>(null);
   const apartmentMarkerRef = useRef<MarkerInstance | null>(null);
+  const apartmentSelectionZoomRef = useRef<number | null>(null);
+  const apartmentOptionMarkerRefs = useRef<MarkerInstance[]>([]);
   const facilityMarkerRefs = useRef<Array<{ marker: MarkerInstance; item: DisplayMarker }>>([]);
   const conditionMarkerRefs = useRef<MarkerInstance[]>([]);
   const savedDestinationIdRef = useRef(getSavedConditionState()?.destinationId);
@@ -434,7 +448,7 @@ export function NaverMapPreview({
   );
   const [dataStatus, setDataStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [apartmentOptions, setApartmentOptions] = useState<ApartmentSummary[]>([]);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedApartment, setSelectedApartment] = useState<ApartmentSummary | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [topSearchOpen, setTopSearchOpen] = useState(false);
@@ -443,7 +457,7 @@ export function NaverMapPreview({
   const [selectedFacility, setSelectedFacility] = useState<MapFeature | null>(null);
   const [compareSummary, setCompareSummary] = useState<FeatureSummary[]>([]);
   const [compareTarget, setCompareTarget] = useState<string>('');
-  const [currentZoom, setCurrentZoom] = useState(15);
+  const [currentZoom, setCurrentZoom] = useState(14);
   const [mapView, setMapView] = useState<MapView>('life');
   const [conditionStep, setConditionStep] = useState<'select' | 'route'>('select');
   const [selectedDestination, setSelectedDestination] = useState<ConditionDestination | null>(null);
@@ -526,7 +540,7 @@ export function NaverMapPreview({
         const center = new window.naver.maps.LatLng(37.5245, 126.866);
         const map = new window.naver.maps.Map(mapElementRef.current, {
           center,
-          zoom: 15,
+          zoom: 14,
           zoomControl: false,
           scaleControl: true,
           scaleControlOptions: {
@@ -536,7 +550,7 @@ export function NaverMapPreview({
         });
 
         mapRef.current = map;
-        setCurrentZoom(map.getZoom?.() ?? 15);
+        setCurrentZoom(map.getZoom?.() ?? 14);
         window.naver.maps.Event.addListener(map, 'idle', () => {
           const zoom = map.getZoom?.() ?? 17;
           setCurrentZoom(zoom);
@@ -560,7 +574,7 @@ export function NaverMapPreview({
   useEffect(() => {
     let cancelled = false;
     setDataStatus('loading');
-    searchApartments('', 10)
+    searchApartments('', 1000)
       .then((items) => {
         if (cancelled) {
           return;
@@ -608,6 +622,33 @@ export function NaverMapPreview({
       window.clearTimeout(timer);
     };
   }, [searchTerm]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    apartmentOptionMarkerRefs.current.forEach((marker) => marker.setMap(null));
+    apartmentOptionMarkerRefs.current = [];
+
+    if (!map || !window.naver?.maps || selectedApartment) {
+      return;
+    }
+
+    apartmentOptionMarkerRefs.current = apartmentOptions.map((apartment) => {
+      const marker = new window.naver!.maps.Marker({
+        position: new window.naver!.maps.LatLng(apartment.latitude, apartment.longitude),
+        map,
+        title: apartment.name,
+        icon: getApartmentMarkerIcon(apartment),
+        zIndex: 80,
+      });
+      window.naver!.maps.Event.addListener(marker, 'click', () => selectApartment(apartment));
+      return marker;
+    });
+
+    return () => {
+      apartmentOptionMarkerRefs.current.forEach((marker) => marker.setMap(null));
+      apartmentOptionMarkerRefs.current = [];
+    };
+  }, [apartmentOptions, selectedApartment, status]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -757,6 +798,12 @@ export function NaverMapPreview({
   }, [conditionCandidates, conditionStep, mapView, selectedApartment, selectedDestination, visibleConditionCategories]);
 
   function selectApartment(apartment: ApartmentSummary) {
+    if (selectedApartment?.id === apartment.id) {
+      deselectApartment();
+      return;
+    }
+
+    const isChangingSelection = selectedApartment !== null;
     setSelectedApartment(apartment);
     setSidebarOpen(false);
     setSelectedFacility(null);
@@ -767,22 +814,48 @@ export function NaverMapPreview({
     if (window.naver?.maps && map) {
       const center = new window.naver.maps.LatLng(apartment.latitude, apartment.longitude);
       map.setCenter?.(center);
-      map.setZoom?.(17);
+      if (!isChangingSelection) {
+        const previousZoom = map.getZoom?.() ?? 14;
+        apartmentSelectionZoomRef.current = previousZoom;
+        map.setZoom?.(previousZoom + 1);
+      }
       window.naver.maps.Event.trigger?.(map, 'resize');
 
       if (!apartmentMarkerRef.current) {
-        apartmentMarkerRef.current = new window.naver.maps.Marker({
+        const selectedMarker = new window.naver.maps.Marker({
           position: center,
           map,
           title: apartment.name,
           icon: getMarkerIcon('집', facilityColors.home, 'home', waezipHomeMarker),
           zIndex: 10000,
         });
+        window.naver.maps.Event.addListener(selectedMarker, 'click', (event) => {
+          event?.stop?.();
+          deselectApartment();
+        });
+        apartmentMarkerRef.current = selectedMarker;
       } else {
         apartmentMarkerRef.current.setPosition?.(center);
         apartmentMarkerRef.current.setMap(map);
         apartmentMarkerRef.current.setZIndex?.(10000);
       }
+    }
+  }
+
+  function deselectApartment() {
+    setSelectedApartment(null);
+    setSelectedFacility(null);
+    setSelectedDestination(null);
+    setConditionStep('select');
+    setCompareSummary([]);
+    setConditionFeatures([]);
+    apartmentMarkerRef.current?.setMap(null);
+
+    const map = mapRef.current;
+    if (map && apartmentSelectionZoomRef.current !== null) {
+      map.setZoom?.(apartmentSelectionZoomRef.current);
+      apartmentSelectionZoomRef.current = null;
+      window.naver?.maps.Event.trigger?.(map, 'resize');
     }
   }
 
@@ -1109,19 +1182,10 @@ export function NaverMapPreview({
             )}
           </div>
 
-          {status === 'ready' && !selectedApartment && (
-            <div className="apartment-bubble-layer" aria-label="지도에서 아파트 선택">
-              {sidebarApartmentOptions.map((apartment) => (
-                <button
-                  className="apartment-map-bubble"
-                  key={apartment.id}
-                  onClick={() => selectApartment(apartment)}
-                  title={apartment.name}
-                  type="button"
-                >
-                  {getBubbleApartmentName(apartment.name)}
-                </button>
-              ))}
+          {status === 'ready' && !selectedApartment && apartmentOptions.length > 0 && (
+            <div className="apartment-map-guide" role="status">
+              <span aria-hidden="true">🏢</span>
+              <div><b>지도에서 아파트를 선택하세요</b><small>단지 이름을 누르면 주변 생활환경을 바로 보여드려요.</small></div>
             </div>
           )}
 

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { AuthProvider } from '../features/auth/AuthContext';
 import { getNearbyFeatures, searchApartments } from '../services/familyMap';
@@ -19,9 +19,45 @@ vi.mock('../services/familyMap', () => ({
 
 vi.mock('../config/env', () => ({
   env: {
-    naverMapsClientId: '',
+    naverMapsClientId: 'test-client-id',
   },
 }));
+
+const mapSetZoom = vi.fn();
+const markerClickListeners: Array<(event?: { stop?: () => void }) => void> = [];
+
+function installNaverMapsMock() {
+  class MapMock {
+    setCenter = vi.fn();
+    setZoom = mapSetZoom;
+    getZoom = () => 14;
+  }
+
+  class MarkerMock {
+    setMap = vi.fn();
+    setIcon = vi.fn();
+    setPosition = vi.fn();
+    setZIndex = vi.fn();
+  }
+
+  window.naver = {
+    maps: {
+      LatLng: class {},
+      Point: class {},
+      Position: { BOTTOM_RIGHT: 'bottom-right' },
+      Map: MapMock,
+      Marker: MarkerMock,
+      Event: {
+        addListener: vi.fn((target, eventName, listener) => {
+          if (target instanceof MarkerMock && eventName === 'click') {
+            markerClickListeners.push(listener);
+          }
+        }),
+        trigger: vi.fn(),
+      },
+    },
+  } as unknown as NonNullable<typeof window.naver>;
+}
 
 const apartment = {
   id: 'apt-1',
@@ -33,6 +69,9 @@ const apartment = {
 
 describe('NaverMapPreview', () => {
   beforeEach(() => {
+    mapSetZoom.mockClear();
+    markerClickListeners.length = 0;
+    installNaverMapsMock();
     vi.mocked(searchApartments).mockResolvedValue([apartment]);
     vi.mocked(getNearbyFeatures).mockResolvedValue({
       apartment,
@@ -45,10 +84,15 @@ describe('NaverMapPreview', () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    delete window.naver;
   });
 
   it('loads only the selected apartment nearby facilities within 1km', async () => {
     renderMap();
+
+    await waitFor(() => {
+      expect(searchApartments).toHaveBeenCalledWith('', 1000);
+    });
 
     fireEvent.click(await screen.findByRole('button', { name: /Test Apartment/ }));
 
@@ -58,6 +102,23 @@ describe('NaverMapPreview', () => {
         ['school', 'kids', 'park', 'hospital', 'crosswalk', 'signal', 'cctv'],
         1000,
       );
+    });
+  });
+
+  it('zooms in when an apartment is selected and restores the zoom when its marker is clicked again', async () => {
+    render(<NaverMapPreview />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Test Apartment/ }));
+    expect(screen.getByText('현재 기준점')).toBeInTheDocument();
+    expect(mapSetZoom).toHaveBeenLastCalledWith(15);
+
+    act(() => {
+      markerClickListeners.at(-1)?.({ stop: vi.fn() });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('현재 기준점')).not.toBeInTheDocument();
+      expect(mapSetZoom).toHaveBeenLastCalledWith(14);
     });
   });
 });
