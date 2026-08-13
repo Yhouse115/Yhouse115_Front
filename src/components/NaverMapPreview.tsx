@@ -37,7 +37,7 @@ type ConditionDestination = {
 type WalkingRouteStatus = 'idle' | 'loading' | 'ready' | 'not-found' | 'error';
 
 function supportsStoredWalkingRoute(category: ConditionCategory) {
-  return category === 'school' || category === 'childcare';
+  return category === 'school' || category === 'childcare' || category === 'park' || category === 'hospital';
 }
 
 type MapOptions = {
@@ -485,7 +485,7 @@ export function NaverMapPreview({
   const [selectedSchoolRoute, setSelectedSchoolRoute] = useState<WalkingRoute | null>(null);
   const [walkingRouteStatus, setWalkingRouteStatus] = useState<WalkingRouteStatus>('idle');
   const [conditionFeatures, setConditionFeatures] = useState<MapFeature[]>([]);
-  const [visibleConditionCategories, setVisibleConditionCategories] = useState<ConditionCategory[]>(() => getSavedConditionState()?.visibleCategories ?? ['school', 'childcare']);
+  const [visibleConditionCategories, setVisibleConditionCategories] = useState<ConditionCategory[]>(() => getSavedConditionState()?.visibleCategories ?? ['school', 'childcare', 'park', 'hospital']);
   const [destinationMenuOpen, setDestinationMenuOpen] = useState(false);
 
   const activeCategories = useMemo(() => getActiveCategories(activeFilters), [activeFilters]);
@@ -518,7 +518,7 @@ export function NaverMapPreview({
       || feature.category === 'hospital'
       || (feature.category === 'kids' && feature.source === 'education_care'),
     );
-    return candidates.map((feature) => {
+    const destinations = candidates.map((feature) => {
       const category: ConditionCategory =
         feature.category === 'school' ? 'school'
           : feature.category === 'park' ? 'park'
@@ -535,7 +535,16 @@ export function NaverMapPreview({
       const routeCrosswalks = conditionFeatures.filter((item) => item.category === 'crosswalk' && distanceToRoute(item, route) <= 45 && !routeSignals.some((signal) => distanceMeters(item.latitude, item.longitude, signal.latitude, signal.longitude) <= 25));
       const routeCctv = conditionFeatures.filter((item) => item.category === 'cctv' && distanceToRoute(item, route) <= 45);
       return { id: feature.id, name: feature.name, category, latitude: feature.latitude, longitude: feature.longitude, address: feature.address, distance: Math.round(Math.max(directDistance, routeDistance)), minutes: Math.max(1, Math.ceil(Math.max(directDistance, routeDistance) / 75)), signals: routeSignals.length, crosswalks: routeCrosswalks.length, cctv: routeCctv.length };
-    }).sort((a, b) => a.distance - b.distance).slice(0, 12);
+    });
+
+    // Medical facilities can be densely clustered. Keep the nearest choices
+    // per condition type so parks and schools are not pushed out by hospitals.
+    return (Object.keys(conditionCategoryMeta) as ConditionCategory[])
+      .flatMap((category) => destinations
+        .filter((destination) => destination.category === category)
+        .sort((a, b) => a.distance - b.distance)
+        .slice(0, 6))
+      .sort((a, b) => a.distance - b.distance);
   }, [conditionFeatures, selectedApartment]);
   const selectedWalkingRoute = useMemo(
     () => selectedDestination && supportsStoredWalkingRoute(selectedDestination.category) ? selectedSchoolRoute : null,
@@ -1085,7 +1094,7 @@ export function NaverMapPreview({
         <button aria-label="처음 화면으로 돌아가기" className="family-map-back" onClick={onBackHome} type="button">‹</button>
         <nav className="map-view-tabs" aria-label="지도 종류">
           <button className={mapView === 'life' ? 'is-active' : ''} onClick={() => setMapView('life')} type="button">생활환경 지도</button>
-          <button className={mapView === 'condition' ? 'is-active' : ''} onClick={() => { setMapView('condition'); setSidebarOpen(false); setVisibleConditionCategories((current) => Array.from(new Set([...current, 'school', 'childcare']))); }} type="button">조건 지도</button>
+          <button className={mapView === 'condition' ? 'is-active' : ''} onClick={() => { setMapView('condition'); setSidebarOpen(false); setVisibleConditionCategories((current) => Array.from(new Set([...current, 'school', 'childcare', 'park', 'hospital']))); }} type="button">조건 지도</button>
         </nav>
         <div className={topSearchOpen ? 'top-search top-search--expanded' : 'top-search'}>
           <button
