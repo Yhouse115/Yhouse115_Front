@@ -1137,6 +1137,18 @@ a {
   margin-left: auto;
 }
 
+.family-map-bar .login-button {
+  min-height: 34px;
+  margin-left: 12px;
+  padding: 0 14px;
+  border: 1px solid #d8ddd5;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #252a26;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
 .search-toggle {
   position: relative;
   z-index: 2;
@@ -1257,7 +1269,6 @@ a {
 }
 
 .sidebar-head div,
-.apartment-option div,
 .go-note div {
   display: grid;
   gap: 4px;
@@ -1268,7 +1279,6 @@ a {
 }
 
 .sidebar-head small,
-.apartment-option small,
 .map-apartment-caption small,
 .map-apartment-caption span,
 .go-note small,
@@ -1297,11 +1307,6 @@ a {
 .sidebar-search button,
 .sidebar-memo button {
   padding: 0 13px;
-}
-
-.apartment-list {
-  display: grid;
-  gap: 8px;
 }
 
 .apartment-suggestions {
@@ -1372,27 +1377,6 @@ a {
   grid-column: 2;
   color: #656365;
   font-size: 0.68rem;
-}
-
-.apartment-option {
-  display: grid;
-  grid-template-columns: 34px 1fr;
-  gap: 9px;
-  padding: 11px;
-  border: 1px solid #e6e6e8;
-  border-radius: 13px;
-  background: #ffffff;
-  color: #090809;
-  text-align: left;
-}
-
-.apartment-option:hover {
-  border-color: #8dc89a;
-  background: #f3faf4;
-}
-
-.apartment-option > span {
-  font-size: 1.5rem;
 }
 
 .sidebar-compare,
