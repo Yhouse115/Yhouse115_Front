@@ -92,7 +92,9 @@ const facilityCategoryKeys: ActiveFacilityKey[] = ['kids', 'school', 'crosswalk'
 const conditionFacilityCategoryKeys: FacilityCategory[] = ['school', 'kids', 'park', 'hospital', 'crosswalk', 'signal', 'cctv'];
 const defaultActiveFilters: ActiveFacilityKey[] = ['kids', 'school'];
 const nearbyRadiusM = 1000;
-const routeSafetyProximityMeters = 45;
+// Crosswalk source points and the pedestrian-network center line can be offset
+// by one road segment, so use the same close-by threshold for display and counts.
+const routeSafetyProximityMeters = 100;
 function getSavedConditionState() {
   try {
     const saved = window.sessionStorage.getItem('whyhouse:condition-map');
