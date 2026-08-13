@@ -1,6 +1,6 @@
 import { env } from '../config/env';
 
-export type FacilityCategory = 'kids' | 'school' | 'crosswalk' | 'signal' | 'cctv' | 'risk';
+export type FacilityCategory = 'kids' | 'school' | 'crosswalk' | 'signal' | 'cctv' | 'risk' | 'park' | 'hospital';
 
 export type ApartmentSummary = {
   id: string;
