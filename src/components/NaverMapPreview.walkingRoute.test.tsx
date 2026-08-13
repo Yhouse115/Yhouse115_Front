@@ -34,6 +34,8 @@ describe('NaverMapPreview walking route', () => {
         name: 'Test Elementary School',
         latitude: 37.521,
         longitude: 126.861,
+        walking_distance_m: 830,
+        walking_time_min: 12,
         metadata: {},
       }],
     });

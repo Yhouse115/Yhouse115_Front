@@ -534,7 +534,24 @@ export function NaverMapPreview({
       const routeSignals = conditionFeatures.filter((item) => item.category === 'signal' && distanceToRoute(item, route) <= 45);
       const routeCrosswalks = conditionFeatures.filter((item) => item.category === 'crosswalk' && distanceToRoute(item, route) <= 45 && !routeSignals.some((signal) => distanceMeters(item.latitude, item.longitude, signal.latitude, signal.longitude) <= 25));
       const routeCctv = conditionFeatures.filter((item) => item.category === 'cctv' && distanceToRoute(item, route) <= 45);
-      return { id: feature.id, name: feature.name, category, latitude: feature.latitude, longitude: feature.longitude, address: feature.address, distance: Math.round(Math.max(directDistance, routeDistance)), minutes: Math.max(1, Math.ceil(Math.max(directDistance, routeDistance) / 75)), signals: routeSignals.length, crosswalks: routeCrosswalks.length, cctv: routeCctv.length };
+      const estimatedDistance = Math.round(Math.max(directDistance, routeDistance));
+      const storedWalkingDistance = feature.walking_distance_m;
+      const storedWalkingTime = feature.walking_time_min;
+      return {
+        id: feature.id,
+        name: feature.name,
+        category,
+        latitude: feature.latitude,
+        longitude: feature.longitude,
+        address: feature.address,
+        distance: Number.isFinite(storedWalkingDistance) ? Math.round(storedWalkingDistance) : estimatedDistance,
+        minutes: Number.isFinite(storedWalkingTime)
+          ? Math.max(1, Math.ceil(storedWalkingTime))
+          : Math.max(1, Math.ceil(estimatedDistance / 75)),
+        signals: routeSignals.length,
+        crosswalks: routeCrosswalks.length,
+        cctv: routeCctv.length,
+      };
     });
 
     // Medical facilities can be densely clustered. Keep the nearest choices
@@ -893,17 +910,9 @@ export function NaverMapPreview({
     conditionMarkerRefs.current = [];
     if (mapView !== 'condition' || !map || !window.naver?.maps || !selectedApartment) return;
 
-    const visibleCandidates = conditionCandidates.filter((item) => {
-      // A child-care destination is a focused route view: do not leave any
-      // competing destination markers on the map while its route is shown.
-      if (selectedDestination?.category === 'childcare') {
-        return item.id === selectedDestination.id;
-      }
-      if (selectedDestination?.category === 'school' && item.category === 'school') {
-        return item.id === selectedDestination.id;
-      }
-      return visibleConditionCategories.includes(item.category);
-    });
+    const visibleCandidates = selectedDestination
+      ? conditionCandidates.filter((item) => item.id === selectedDestination.id)
+      : conditionCandidates.filter((item) => visibleConditionCategories.includes(item.category));
     conditionMarkerRefs.current = visibleCandidates.map((destination) => {
         const isSelected = destination.id === selectedDestination?.id;
         const destinationRoute = isSelected ? selectedWalkingRoute : null;

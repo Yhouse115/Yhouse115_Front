@@ -22,6 +22,8 @@ export type MapFeature = {
   longitude: number;
   address?: string | null;
   distance_m?: number | null;
+  walking_distance_m?: number | null;
+  walking_time_min?: number | null;
   geometry?: Record<string, unknown> | null;
   metadata: Record<string, unknown>;
 };
