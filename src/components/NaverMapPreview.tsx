@@ -37,7 +37,7 @@ type ConditionDestination = {
 type WalkingRouteStatus = 'idle' | 'loading' | 'ready' | 'not-found' | 'error';
 
 function supportsStoredWalkingRoute(category: ConditionCategory) {
-  return category === 'school' || category === 'childcare' || category === 'park' || category === 'hospital';
+  return category === 'school' || category === 'childcare' || category === 'park';
 }
 
 type MapOptions = {
@@ -92,6 +92,7 @@ const facilityCategoryKeys: ActiveFacilityKey[] = ['kids', 'school', 'crosswalk'
 const conditionFacilityCategoryKeys: FacilityCategory[] = ['school', 'kids', 'park', 'hospital', 'crosswalk', 'signal', 'cctv'];
 const defaultActiveFilters: ActiveFacilityKey[] = ['kids', 'school'];
 const nearbyRadiusM = 1000;
+const conditionParkRadiusM = 3000;
 // Crosswalk source points and the pedestrian-network center line can be offset
 // by one road segment, so use the same close-by threshold for display and counts.
 const routeSafetyProximityMeters = 100;
@@ -776,11 +777,15 @@ export function NaverMapPreview({
 
     let cancelled = false;
     setDataStatus('loading');
-    getNearbyFeatures(selectedApartment.id, conditionFacilityCategoryKeys, nearbyRadiusM)
-      .then((result) => {
+    Promise.all([
+      getNearbyFeatures(selectedApartment.id, conditionFacilityCategoryKeys, nearbyRadiusM),
+      getNearbyFeatures(selectedApartment.id, ['park'], conditionParkRadiusM),
+    ])
+      .then(([nearbyResult, parkResult]) => {
         if (!cancelled) {
-          setCompareSummary(result.summary);
-          setConditionFeatures(result.features);
+          const nonParkFeatures = nearbyResult.features.filter((feature) => feature.category !== 'park');
+          setCompareSummary(nearbyResult.summary);
+          setConditionFeatures([...nonParkFeatures, ...parkResult.features.filter((feature) => feature.category === 'park')]);
           setDataStatus('idle');
         }
       })
