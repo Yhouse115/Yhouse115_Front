@@ -585,6 +585,11 @@ export function NaverMapPreview({
   const selectedDestinationSignals = selectedWalkingRoute
     ? selectedRouteSafetyFeatures.filter((feature) => feature.category === 'signal').length
     : selectedDestination?.signals;
+  const selectedRouteSafetyMessage = selectedWalkingRoute
+    && walkingRouteStatus === 'ready'
+    && selectedRouteSafetyFeatures.length === 0
+    ? '이 경로에는 표시할 횡단보도·보행신호 데이터가 없습니다.'
+    : null;
   const selectedDestinationDistance = selectedWalkingRoute
     ? Math.round(selectedWalkingRoute.walkDistanceMeters)
     : selectedDestination?.distance;
@@ -1351,7 +1356,7 @@ export function NaverMapPreview({
 
               <aside className="condition-control-card">
                 <div className="condition-control-title"><div><small>{conditionStep === 'route' ? '선택한 경로' : '목적지 탐색'}</small><h2>{conditionStep === 'route' ? '조건 분석' : '어디로 갈까요?'}</h2></div><button onClick={() => setDestinationMenuOpen((open) => !open)} type="button">✨</button></div>
-                {conditionStep === 'route' && selectedDestination ? <div className="condition-metrics"><div><span>🚶</span><small>도보 시간</small><b>{selectedDestinationMinutes}분</b></div><div><span>🚸</span><small>횡단보도</small><b>{selectedDestinationCrosswalks}개</b></div><div><span>🚦</span><small>보행신호</small><b>{selectedDestinationSignals}개</b></div><div><span>📹</span><small>CCTV</small><b>{selectedDestination.cctv}개</b></div>{supportsStoredWalkingRoute(selectedDestination.category) && walkingRouteMessage && <p className="condition-route-status" role="status">{walkingRouteMessage}</p>}<button onClick={resetDestination} type="button">다른 목적지 선택</button></div> : <div className="condition-categories">{(Object.entries(conditionCategoryMeta) as Array<[ConditionCategory, { label: string; icon: string }]>).map(([key, meta]) => <button className={visibleConditionCategories.includes(key) ? 'is-active' : ''} key={key} onClick={() => toggleConditionCategory(key)} type="button"><span>{meta.icon}</span>{meta.label}<small>{visibleConditionCategories.includes(key) ? '표시 중' : '선택'}</small></button>)}</div>}
+                {conditionStep === 'route' && selectedDestination ? <div className="condition-metrics"><div><span>🚶</span><small>도보 시간</small><b>{selectedDestinationMinutes}분</b></div><div><span>🚸</span><small>횡단보도</small><b>{selectedDestinationCrosswalks}개</b></div><div><span>🚦</span><small>보행신호</small><b>{selectedDestinationSignals}개</b></div><div><span>📹</span><small>CCTV</small><b>{selectedDestination.cctv}개</b></div>{supportsStoredWalkingRoute(selectedDestination.category) && walkingRouteMessage && <p className="condition-route-status" role="status">{walkingRouteMessage}</p>}{selectedRouteSafetyMessage && <p className="condition-route-status" role="status">{selectedRouteSafetyMessage}</p>}<button onClick={resetDestination} type="button">다른 목적지 선택</button></div> : <div className="condition-categories">{(Object.entries(conditionCategoryMeta) as Array<[ConditionCategory, { label: string; icon: string }]>).map(([key, meta]) => <button className={visibleConditionCategories.includes(key) ? 'is-active' : ''} key={key} onClick={() => toggleConditionCategory(key)} type="button"><span>{meta.icon}</span>{meta.label}<small>{visibleConditionCategories.includes(key) ? '표시 중' : '선택'}</small></button>)}</div>}
                 {destinationMenuOpen && <div className="destination-menu">{conditionCandidates.map((item) => <button key={item.id} onClick={() => selectDestination(item)} type="button"><span>{conditionCategoryMeta[item.category].icon} {item.name}</span><small>도보 {item.minutes}분 · {item.distance}m</small></button>)}</div>}
               </aside>
               {conditionStep === 'select' && conditionCandidates.length === 0 && <div className="condition-empty">주변 학교·공원·어린이집·병원 정보를 불러오는 중입니다.</div>}
