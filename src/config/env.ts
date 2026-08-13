@@ -1,6 +1,8 @@
 export const env = {
   appName: import.meta.env.VITE_APP_NAME ?? 'WhyHouse Front',
   apiBaseUrl: import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000',
+  supabaseUrl: import.meta.env.VITE_SUPABASE_URL ?? '',
+  supabaseAnonKey: import.meta.env.VITE_SUPABASE_ANON_KEY ?? '',
   naverMapsClientId: import.meta.env.VITE_NAVER_MAPS_CLIENT_ID ?? '',
   naverMapsDefaultStyleId: import.meta.env.VITE_NAVER_MAPS_DEFAULT_STYLE_ID ?? '',
   naverMapsTransitStyleId: import.meta.env.VITE_NAVER_MAPS_TRANSIT_STYLE_ID ?? '',

@@ -1,94 +1,144 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { env } from '../config/env';
+import waezipHomeMarker from '../assets/waezip-home-marker.png';
+import waezipLogo from '../assets/waezip-logo.png';
+import {
+  getFeaturesInBounds,
+  getNearbyFeatures,
+  searchApartments,
+  type ApartmentSummary,
+  type FacilityCategory,
+  type FeatureSummary,
+  type MapFeature,
+} from '../services/familyMap';
 
 type MapStatus = 'loading' | 'ready' | 'missing-key' | 'error';
-type StylePresetKey = 'standard' | 'operator' | 'transit' | 'soft';
-
-type MapStylePreset = {
-  key: StylePresetKey;
-  label: string;
-  description: string;
-  customStyleId: string;
-  accentColor: string;
-  surfaceColor: string;
-};
-
-type MapSettings = {
-  styleKey: StylePresetKey;
-  showHomeMarker: boolean;
-  showSubwayStations: boolean;
-  homeMarkerColor: string;
-  subwayMarkerColor: string;
+type FacilityKey = 'all' | 'kids' | 'school' | 'crosswalk' | 'signal' | 'cctv' | 'risk';
+type ActiveFacilityKey = Exclude<FacilityKey, 'all'>;
+type MapView = 'life' | 'condition';
+type ConditionCategory = 'school' | 'park' | 'childcare' | 'hospital';
+type ConditionDestination = {
+  id: string;
+  name: string;
+  category: 'school' | 'childcare';
+  latitude: number;
+  longitude: number;
+  address?: string | null;
+  minutes: number;
+  distance: number;
+  crosswalks: number;
+  signals: number;
+  cctv: number;
 };
 
 type MapOptions = {
   center?: unknown;
   zoom?: number;
-  gl?: boolean;
-  customStyleId?: string;
   zoomControl?: boolean;
   scaleControl?: boolean;
+  scaleControlOptions?: {
+    position?: unknown;
+  };
   mapDataControl?: boolean;
 };
 
 type MapInstance = {
-  setOptions: (options: MapOptions) => void;
+  setCenter?: (center: unknown) => void;
+  setZoom?: (zoom: number) => void;
+  getZoom?: () => number;
+  getBounds?: () => {
+    getSW: () => { lat: () => number; lng: () => number };
+    getNE: () => { lat: () => number; lng: () => number };
+  };
 };
 
 type MarkerInstance = {
   setMap: (map: MapInstance | null) => void;
-  setIcon: (icon: { content: string; anchor?: unknown }) => void;
+  setIcon?: (icon: { content: string; anchor?: unknown }) => void;
+  setPosition?: (position: unknown) => void;
+  setZIndex?: (zIndex: number) => void;
 };
 
-const operatorMapDefaults: MapSettings = {
-  styleKey: 'standard',
-  showHomeMarker: true,
-  showSubwayStations: true,
-  homeMarkerColor: '#2563eb',
-  subwayMarkerColor: '#19a463',
+type NaverMapsEvent = {
+  addListener: (
+    target: MarkerInstance | MapInstance,
+    eventName: string,
+    listener: (event?: { stop?: () => void }) => void,
+  ) => void;
+  trigger?: (target: MapInstance, eventName: string) => void;
 };
 
-const mapStylePresets: MapStylePreset[] = [
-  {
-    key: 'standard',
-    label: '네이버 기본',
-    description: '별도 커스텀 스타일 없이 기본 지도를 사용합니다.',
-    customStyleId: '',
-    accentColor: '#2563eb',
-    surfaceColor: '#f7fafc',
-  },
-  {
-    key: 'operator',
-    label: '운영 커스텀',
-    description: '서비스 운영자가 별도로 발행한 커스텀 지도 스타일입니다.',
-    customStyleId: env.naverMapsDefaultStyleId,
-    accentColor: '#1f8a5b',
-    surfaceColor: '#eef8f1',
-  },
-  {
-    key: 'transit',
-    label: '교통 강조',
-    description: '대중교통과 주요 이동축을 보기 위한 스타일입니다.',
-    customStyleId: env.naverMapsTransitStyleId,
-    accentColor: '#2563eb',
-    surfaceColor: '#edf4ff',
-  },
-  {
-    key: 'soft',
-    label: '생활권 보기',
-    description: '학교와 생활 시설을 차분하게 보기 위한 스타일입니다.',
-    customStyleId: env.naverMapsSoftStyleId,
-    accentColor: '#c27a32',
-    surfaceColor: '#fff7ed',
-  },
+type BoundsLike = {
+  getSW: () => { lat: () => number; lng: () => number };
+  getNE: () => { lat: () => number; lng: () => number };
+};
+
+type DisplayMarker = {
+  id: string;
+  category: FacilityCategory;
+  name: string;
+  latitude: number;
+  longitude: number;
+  count: number;
+  features: MapFeature[];
+};
+
+const facilityCategoryKeys: FacilityCategory[] = ['kids', 'school', 'crosswalk', 'signal', 'cctv', 'risk'];
+const defaultActiveFilters: ActiveFacilityKey[] = ['kids', 'school'];
+function getSavedConditionState() {
+  try {
+    const saved = window.sessionStorage.getItem('whyhouse:condition-map');
+    if (!saved) return null;
+    return JSON.parse(saved) as { destinationId?: string; conditionStep?: 'select' | 'route'; visibleCategories?: ConditionCategory[] };
+  } catch {
+    return null;
+  }
+}
+
+function distanceMeters(aLat: number, aLng: number, bLat: number, bLng: number) {
+  const rad = (value: number) => value * Math.PI / 180;
+  const dLat = rad(bLat - aLat);
+  const dLng = rad(bLng - aLng);
+  const value = Math.sin(dLat / 2) ** 2 + Math.cos(rad(aLat)) * Math.cos(rad(bLat)) * Math.sin(dLng / 2) ** 2;
+  return 6371000 * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
+}
+
+function distanceToRoute(feature: MapFeature, route: Array<{ latitude: number; longitude: number }>) {
+  return Math.min(...route.slice(0, -1).map((point, index) => {
+    const next = route[index + 1];
+    return Math.min(...Array.from({ length: 11 }, (_, sample) => {
+      const ratio = sample / 10;
+      return distanceMeters(feature.latitude, feature.longitude, point.latitude + (next.latitude - point.latitude) * ratio, point.longitude + (next.longitude - point.longitude) * ratio);
+    }));
+  }));
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character] ?? character);
+}
+
+const facilityFilters: Array<{ key: FacilityKey; label: string; icon: string }> = [
+  { key: 'all', label: '전체', icon: '🗺️' },
+  { key: 'kids', label: '어린이시설', icon: '🧸' },
+  { key: 'school', label: '학교', icon: '🏫' },
+  { key: 'crosswalk', label: '횡단보도', icon: '🚸' },
+  { key: 'signal', label: '보행신호', icon: '🚦' },
+  { key: 'cctv', label: 'CCTV', icon: '📹' },
+  { key: 'risk', label: '주의구간', icon: '⚠️' },
 ];
 
-const subwayStations = [
-  { name: '목동역', line: '5', lat: 37.5261, lng: 126.8644 },
-  { name: '오목교역', line: '5', lat: 37.5244, lng: 126.8752 },
-  { name: '신정네거리역', line: '2', lat: 37.5203, lng: 126.8529 },
-];
+const facilityColors: Record<Exclude<FacilityKey, 'all'> | 'home', string> = {
+  home: '#A5D3A8',
+  kids: '#F9CC19',
+  school: '#F9CC19',
+  crosswalk: '#A5D3A8',
+  signal: '#A2D6F1',
+  cctv: '#9B6DE7',
+  risk: '#FF5B66',
+};
+
+const clusterMergeDistancePx = 49;
 
 declare global {
   interface Window {
@@ -96,19 +146,21 @@ declare global {
       maps: {
         LatLng: new (lat: number, lng: number) => unknown;
         Point: new (x: number, y: number) => unknown;
-        Map: new (
-          element: HTMLElement,
-          options: MapOptions,
-        ) => MapInstance;
+        Position: {
+          BOTTOM_RIGHT: unknown;
+        };
+        Map: new (element: HTMLElement, options: MapOptions) => MapInstance;
         Marker: new (options: {
           position: unknown;
-          map: MapInstance;
+          map?: MapInstance | null;
           title?: string;
           icon?: {
             content: string;
             anchor?: unknown;
           };
+          zIndex?: number;
         }) => MarkerInstance;
+        Event: NaverMapsEvent;
       };
     };
     __whyhouseNaverMapLoading?: Promise<void>;
@@ -135,6 +187,7 @@ function loadNaverMaps(clientId: string): Promise<void> {
     const params = new URLSearchParams({
       ncpKeyId: clientId,
       callback: '__whyhouseNaverMapReady',
+      submodules: 'geocoder',
     });
     script.src = `https://oapi.map.naver.com/openapi/v3/maps.js?${params.toString()}`;
     script.async = true;
@@ -148,69 +201,297 @@ function loadNaverMaps(clientId: string): Promise<void> {
   return window.__whyhouseNaverMapLoading;
 }
 
-function getStylePreset(styleKey: StylePresetKey) {
-  return mapStylePresets.find((preset) => preset.key === styleKey) ?? mapStylePresets[0];
-}
-
-function getEffectiveCustomStyleId(styleKey: StylePresetKey, showSubwayStations: boolean) {
-  if (!showSubwayStations && env.naverMapsNoTransitStyleId) {
-    return env.naverMapsNoTransitStyleId;
+function getMarkerIcon(labelOrIcon: string, color: string, variant: 'home' | 'facility', imageUrl?: string) {
+  if (variant === 'home' && imageUrl) {
+    return {
+      content: `
+        <span class="map-character-pin" style="--pin-color: ${color}">
+          <img alt="집" src="${imageUrl}" />
+        </span>
+      `,
+      anchor: window.naver ? new window.naver.maps.Point(37, 74) : undefined,
+    };
   }
-
-  return getStylePreset(styleKey).customStyleId;
-}
-
-function getMapOptions(settings: MapSettings, center?: unknown): MapOptions {
-  const customStyleId = getEffectiveCustomStyleId(settings.styleKey, settings.showSubwayStations);
-  const options: MapOptions = {
-    center,
-    zoom: 15,
-    zoomControl: true,
-    scaleControl: true,
-    mapDataControl: true,
-  };
-
-  if (customStyleId) {
-    options.gl = true;
-    options.customStyleId = customStyleId;
-  }
-
-  return options;
-}
-
-function getMarkerIcon(label: string, color: string, variant: 'home' | 'subway') {
-  const isHome = variant === 'home';
-  const size = isHome ? 34 : 30;
-  const radius = size / 2;
 
   return {
     content: `
-      <span class="map-custom-marker map-custom-marker--${variant}" style="--marker-color: ${color}">
-        ${label}
+      <span class="map-pin map-pin--${variant}" style="--pin-color: ${color}">
+        <span>${labelOrIcon}</span>
       </span>
     `,
-    anchor: window.naver ? new window.naver.maps.Point(radius, radius) : undefined,
+    anchor: window.naver ? new window.naver.maps.Point(21, 44) : undefined,
   };
 }
 
-export function NaverMapPreview() {
+function getClusterMarkerIcon(count: number) {
+  return {
+    content: `
+      <span class="map-cluster-pin">
+        <b>${count}</b>
+      </span>
+    `,
+    anchor: window.naver ? new window.naver.maps.Point(30, 30) : undefined,
+  };
+}
+
+function filterApartmentSuggestions(apartments: ApartmentSummary[], term: string, limit: number) {
+  const normalized = term.trim().toLowerCase();
+  if (!normalized) {
+    return apartments.slice(0, limit);
+  }
+
+  return apartments.filter((apartment) => apartment.name.toLowerCase().includes(normalized)).slice(0, limit);
+}
+
+function getActiveCategories(activeFilters: ActiveFacilityKey[]): FacilityCategory[] {
+  return activeFilters;
+}
+
+function getBubbleApartmentName(name: string) {
+  return Array.from(name.replace(/\s+/g, '')).slice(0, 8).join('');
+}
+
+function getFeatureLabel(category: FacilityCategory) {
+  return facilityFilters.find((filter) => filter.key === category)?.label ?? category;
+}
+
+function formatFeatureDetail(feature: MapFeature) {
+  const clusteredCount = feature.metadata?.count;
+  if (typeof clusteredCount === 'number' && clusteredCount > 1) {
+    return `${clusteredCount}개 지점이 모여 있습니다.`;
+  }
+
+  if (feature.distance_m != null) {
+    return `${Math.round(feature.distance_m)}m 거리`;
+  }
+
+  return feature.address ?? getFeatureLabel(feature.category);
+}
+
+function getSummaryCount(summary: FeatureSummary[], category: FacilityCategory) {
+  return summary.find((item) => item.category === category)?.count ?? 0;
+}
+
+function getFeatureSummaryItems(summary: FeatureSummary[]) {
+  return [
+    { key: 'kids' as const, label: '어린이시설', value: `${getSummaryCount(summary, 'kids')}곳` },
+    { key: 'school' as const, label: '학교', value: `${getSummaryCount(summary, 'school')}곳` },
+    { key: 'crosswalk' as const, label: '횡단보도', value: `${getSummaryCount(summary, 'crosswalk')}개` },
+    { key: 'signal' as const, label: '보행신호', value: `${getSummaryCount(summary, 'signal')}개` },
+    { key: 'cctv' as const, label: 'CCTV', value: `${getSummaryCount(summary, 'cctv')}대` },
+    { key: 'risk' as const, label: '주의구간', value: `${getSummaryCount(summary, 'risk')}곳` },
+  ];
+}
+
+function getClusterGridMeters(zoom: number) {
+  if (zoom <= 11) return 2000;
+  if (zoom <= 12) return 1000;
+  if (zoom <= 13) return 500;
+  if (zoom <= 14) return 250;
+  if (zoom <= 15) return 150;
+  if (zoom <= 16) return 100;
+  return 0;
+}
+
+function projectMarkerToPixel(latitude: number, longitude: number, zoom: number) {
+  const sinLatitude = Math.sin((latitude * Math.PI) / 180);
+  const scale = 256 * 2 ** zoom;
+  return {
+    x: ((longitude + 180) / 360) * scale,
+    y: (0.5 - Math.log((1 + sinLatitude) / (1 - sinLatitude)) / (4 * Math.PI)) * scale,
+  };
+}
+
+function mergeClusterMarkersByOverlap(markers: DisplayMarker[], zoom: number) {
+  const merged: DisplayMarker[] = [];
+
+  for (const marker of markers) {
+    if (marker.count <= 1) {
+      merged.push(marker);
+      continue;
+    }
+
+    const markerPixel = projectMarkerToPixel(marker.latitude, marker.longitude, zoom);
+    const targetIndex = merged.findIndex((candidate) => {
+      if (candidate.count <= 1) {
+        return false;
+      }
+
+      const candidatePixel = projectMarkerToPixel(candidate.latitude, candidate.longitude, zoom);
+      const distance = Math.hypot(markerPixel.x - candidatePixel.x, markerPixel.y - candidatePixel.y);
+      return distance <= clusterMergeDistancePx;
+    });
+
+    if (targetIndex === -1) {
+      merged.push(marker);
+      continue;
+    }
+
+    const target = merged[targetIndex];
+    const features = [...target.features, ...marker.features];
+    const count = target.count + marker.count;
+    merged[targetIndex] = {
+      ...target,
+      id: `${target.id}:${marker.id}`,
+      name: `${count}개 지점`,
+      latitude: (target.latitude * target.count + marker.latitude * marker.count) / count,
+      longitude: (target.longitude * target.count + marker.longitude * marker.count) / count,
+      count,
+      features,
+    };
+  }
+
+  return merged;
+}
+
+function getDisplayMarkers(features: MapFeature[], zoom: number): DisplayMarker[] {
+  if (features.some((feature) => feature.source === 'cluster')) {
+    const markers = features.filter((feature) => zoom < 17 || feature.source !== 'cluster').map((feature) => {
+      const count = typeof feature.metadata?.count === 'number' ? feature.metadata.count : 1;
+      return {
+        id: feature.id,
+        category: feature.category,
+        name: count > 1 ? `${getFeatureLabel(feature.category)} ${count}개` : feature.name,
+        latitude: feature.latitude,
+        longitude: feature.longitude,
+        count,
+        features: [feature],
+      };
+    });
+    return mergeClusterMarkersByOverlap(markers, zoom);
+  }
+
+  const gridMeters = getClusterGridMeters(zoom);
+  if (gridMeters === 0) {
+    return features.map((feature) => ({
+      id: feature.id,
+      category: feature.category,
+      name: feature.name,
+      latitude: feature.latitude,
+      longitude: feature.longitude,
+      count: 1,
+      features: [feature],
+    }));
+  }
+
+  const buckets = new Map<string, MapFeature[]>();
+  for (const feature of features) {
+    const latGrid = gridMeters / 111320;
+    const lngGrid = gridMeters / (111320 * Math.cos((feature.latitude * Math.PI) / 180));
+    const latKey = Math.round(feature.latitude / latGrid);
+    const lngKey = Math.round(feature.longitude / lngGrid);
+    const key = `${latKey}:${lngKey}`;
+    buckets.set(key, [...(buckets.get(key) ?? []), feature]);
+  }
+
+  const markers = Array.from(buckets.entries()).map(([key, bucket]) => {
+    const latitude = bucket.reduce((sum, feature) => sum + feature.latitude, 0) / bucket.length;
+    const longitude = bucket.reduce((sum, feature) => sum + feature.longitude, 0) / bucket.length;
+    const category = bucket[0].category;
+    return {
+      id: key,
+      category,
+      name: bucket.length > 1 ? `${bucket.length}개 지점` : bucket[0].name,
+      latitude,
+      longitude,
+      count: bucket.length,
+      features: bucket,
+    };
+  });
+  return mergeClusterMarkersByOverlap(markers, zoom);
+}
+
+export function NaverMapPreview({
+  onBackHome,
+  onOpenInvestment,
+}: {
+  onBackHome?: () => void;
+  onOpenInvestment?: () => void;
+}) {
   const mapElementRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapInstance | null>(null);
-  const homeMarkerRef = useRef<MarkerInstance | null>(null);
-  const subwayMarkerRefs = useRef<MarkerInstance[]>([]);
-  const settingsRef = useRef<MapSettings>(operatorMapDefaults);
-  const currentCustomStyleIdRef = useRef(
-    getEffectiveCustomStyleId(operatorMapDefaults.styleKey, operatorMapDefaults.showSubwayStations),
-  );
+  const apartmentMarkerRef = useRef<MarkerInstance | null>(null);
+  const facilityMarkerRefs = useRef<Array<{ marker: MarkerInstance; item: DisplayMarker }>>([]);
+  const conditionMarkerRefs = useRef<MarkerInstance[]>([]);
+  const savedDestinationIdRef = useRef(getSavedConditionState()?.destinationId);
+  const featureRequestIdRef = useRef(0);
+  const selectedApartmentRef = useRef<ApartmentSummary | null>(null);
+  const activeCategoriesRef = useRef<FacilityCategory[]>([]);
+  const boundsFetchTimerRef = useRef<number | null>(null);
+  const lastBoundsRequestKeyRef = useRef('');
+  const defaultApartmentOptionsRef = useRef<ApartmentSummary[]>([]);
   const [status, setStatus] = useState<MapStatus>(() =>
     env.naverMapsClientId ? 'loading' : 'missing-key',
   );
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settings, setSettings] = useState<MapSettings>(operatorMapDefaults);
+  const [dataStatus, setDataStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [apartmentOptions, setApartmentOptions] = useState<ApartmentSummary[]>([]);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [selectedApartment, setSelectedApartment] = useState<ApartmentSummary | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [topSearchOpen, setTopSearchOpen] = useState(false);
+  const [activeFilters, setActiveFilters] = useState<ActiveFacilityKey[]>(defaultActiveFilters);
+  const [animatedFilter, setAnimatedFilter] = useState<FacilityKey | null>(null);
+  const [selectedFacility, setSelectedFacility] = useState<MapFeature | null>(null);
+  const [features, setFeatures] = useState<MapFeature[]>([]);
+  const [summary, setSummary] = useState<FeatureSummary[]>([]);
+  const [compareSummary, setCompareSummary] = useState<FeatureSummary[]>([]);
+  const [compareTarget, setCompareTarget] = useState<string>('');
+  const [currentZoom, setCurrentZoom] = useState(15);
+  const [mapView, setMapView] = useState<MapView>('life');
+  const [conditionStep, setConditionStep] = useState<'select' | 'route'>('select');
+  const [selectedDestination, setSelectedDestination] = useState<ConditionDestination | null>(null);
+  const [conditionFeatures, setConditionFeatures] = useState<MapFeature[]>([]);
+  const [visibleConditionCategories, setVisibleConditionCategories] = useState<ConditionCategory[]>(() => getSavedConditionState()?.visibleCategories ?? ['school', 'childcare']);
+  const [destinationMenuOpen, setDestinationMenuOpen] = useState(false);
+
+  const activeCategories = useMemo(() => getActiveCategories(activeFilters), [activeFilters]);
+  const topApartmentSuggestions = useMemo(
+    () => filterApartmentSuggestions(apartmentOptions, searchTerm, 12),
+    [apartmentOptions, searchTerm],
+  );
+  const sidebarApartmentSuggestions = useMemo(
+    () => filterApartmentSuggestions(apartmentOptions, searchTerm, 12),
+    [apartmentOptions, searchTerm],
+  );
+  const sidebarApartmentOptions = apartmentOptions.slice(0, 3);
+  const compareApartmentOptions = apartmentOptions.filter((apartment) => apartment.id !== selectedApartment?.id).slice(0, 5);
+  const summaryItems = useMemo(() => getFeatureSummaryItems(compareSummary), [compareSummary]);
+  const displayMarkers = useMemo(() => getDisplayMarkers(features, currentZoom), [features, currentZoom]);
+  const conditionCandidates = useMemo(() => {
+    if (!selectedApartment) return [];
+    const candidates = conditionFeatures.filter((feature) => feature.category === 'school' || (feature.category === 'kids' && feature.source === 'childcare_centers'));
+    return candidates.map((feature) => {
+      const category = feature.category === 'school' ? 'school' as const : 'childcare' as const;
+      const directDistance = distanceMeters(selectedApartment.latitude, selectedApartment.longitude, feature.latitude, feature.longitude);
+      const route = [
+        { latitude: selectedApartment.latitude, longitude: selectedApartment.longitude },
+        { latitude: selectedApartment.latitude, longitude: feature.longitude },
+        { latitude: feature.latitude, longitude: feature.longitude },
+      ];
+      const routeDistance = distanceMeters(route[0].latitude, route[0].longitude, route[1].latitude, route[1].longitude) + distanceMeters(route[1].latitude, route[1].longitude, route[2].latitude, route[2].longitude);
+      const routeSignals = conditionFeatures.filter((item) => item.category === 'signal' && distanceToRoute(item, route) <= 45);
+      const routeCrosswalks = conditionFeatures.filter((item) => item.category === 'crosswalk' && distanceToRoute(item, route) <= 45 && !routeSignals.some((signal) => distanceMeters(item.latitude, item.longitude, signal.latitude, signal.longitude) <= 25));
+      const routeCctv = conditionFeatures.filter((item) => item.category === 'cctv' && distanceToRoute(item, route) <= 45);
+      return { id: feature.id, name: feature.name, category, latitude: feature.latitude, longitude: feature.longitude, address: feature.address, distance: Math.round(Math.max(directDistance, routeDistance)), minutes: Math.max(1, Math.ceil(Math.max(directDistance, routeDistance) / 75)), signals: routeSignals.length, crosswalks: routeCrosswalks.length, cctv: routeCctv.length };
+    }).sort((a, b) => a.distance - b.distance).slice(0, 12);
+  }, [conditionFeatures, selectedApartment]);
 
   useEffect(() => {
-    settingsRef.current = settings;
-  }, [settings]);
+    selectedApartmentRef.current = selectedApartment;
+  }, [selectedApartment]);
+
+  useEffect(() => {
+    window.sessionStorage.setItem('whyhouse:condition-map', JSON.stringify({
+      destinationId: selectedDestination?.id,
+      conditionStep,
+      visibleCategories: visibleConditionCategories,
+      lastUpdatedAt: Date.now(),
+    }));
+  }, [conditionStep, selectedDestination, visibleConditionCategories]);
+
+  useEffect(() => {
+    activeCategoriesRef.current = activeCategories;
+  }, [activeCategories]);
 
   useEffect(() => {
     if (!env.naverMapsClientId) {
@@ -225,37 +506,37 @@ export function NaverMapPreview() {
           return;
         }
 
-        const initialSettings = settingsRef.current;
-        const center = new window.naver.maps.LatLng(37.5207, 126.8563);
+        const center = new window.naver.maps.LatLng(37.5245, 126.866);
         const map = new window.naver.maps.Map(mapElementRef.current, {
           center,
-          ...getMapOptions(initialSettings, center),
+          zoom: 15,
+          zoomControl: false,
+          scaleControl: true,
+          scaleControlOptions: {
+            position: window.naver.maps.Position.BOTTOM_RIGHT,
+          },
+          mapDataControl: true,
         });
-
-        homeMarkerRef.current = new window.naver.maps.Marker({
-          position: center,
-          map,
-          title: '신정권역',
-          icon: getMarkerIcon('집', initialSettings.homeMarkerColor, 'home'),
-        });
-
-        subwayMarkerRefs.current = subwayStations.map((station) => (
-          new window.naver!.maps.Marker({
-            position: new window.naver!.maps.LatLng(station.lat, station.lng),
-            map,
-            title: station.name,
-            icon: getMarkerIcon(station.line, initialSettings.subwayMarkerColor, 'subway'),
-          })
-        ));
 
         mapRef.current = map;
-        currentCustomStyleIdRef.current = getEffectiveCustomStyleId(
-          initialSettings.styleKey,
-          initialSettings.showSubwayStations,
-        );
-        homeMarkerRef.current.setMap(initialSettings.showHomeMarker ? map : null);
-        subwayMarkerRefs.current.forEach((marker) => {
-          marker.setMap(initialSettings.showSubwayStations ? map : null);
+        setCurrentZoom(map.getZoom?.() ?? 15);
+        window.naver.maps.Event.addListener(map, 'idle', () => {
+          const zoom = map.getZoom?.() ?? 17;
+          setCurrentZoom(zoom);
+          if (!selectedApartmentRef.current) {
+            return;
+          }
+
+          if (boundsFetchTimerRef.current) {
+            window.clearTimeout(boundsFetchTimerRef.current);
+          }
+
+          boundsFetchTimerRef.current = window.setTimeout(() => {
+            void refreshFeaturesByBounds(activeCategoriesRef.current);
+          }, 420);
+        });
+        window.naver.maps.Event.addListener(map, 'click', () => {
+          setSelectedFacility(null);
         });
         setStatus('ready');
       })
@@ -267,218 +548,654 @@ export function NaverMapPreview() {
 
     return () => {
       cancelled = true;
+      if (boundsFetchTimerRef.current) {
+        window.clearTimeout(boundsFetchTimerRef.current);
+      }
     };
   }, []);
 
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map) {
+    let cancelled = false;
+    setDataStatus('loading');
+    searchApartments('', 10)
+      .then((items) => {
+        if (cancelled) {
+          return;
+        }
+        setApartmentOptions(items);
+        defaultApartmentOptionsRef.current = items;
+        setCompareTarget(items[1]?.id ?? items[0]?.id ?? '');
+        setDataStatus('idle');
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDataStatus('error');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const normalized = searchTerm.trim();
+    if (!normalized) {
+      setApartmentOptions(defaultApartmentOptionsRef.current);
       return;
     }
 
-    homeMarkerRef.current?.setIcon(getMarkerIcon('집', settings.homeMarkerColor, 'home'));
-    homeMarkerRef.current?.setMap(settings.showHomeMarker ? map : null);
-    subwayMarkerRefs.current.forEach((marker, index) => {
-      marker.setIcon(getMarkerIcon(subwayStations[index]?.line ?? '역', settings.subwayMarkerColor, 'subway'));
-      marker.setMap(settings.showSubwayStations ? map : null);
-    });
-  }, [
-    settings.homeMarkerColor,
-    settings.showHomeMarker,
-    settings.showSubwayStations,
-    settings.subwayMarkerColor,
-  ]);
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      searchApartments(normalized, 20)
+        .then((items) => {
+          if (!cancelled) {
+            setApartmentOptions(items);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setApartmentOptions([]);
+          }
+        });
+    }, 180);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [searchTerm]);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) {
+    if (!map || !window.naver?.maps) {
       return;
     }
 
-    const nextCustomStyleId = getEffectiveCustomStyleId(settings.styleKey, settings.showSubwayStations);
-    if (!nextCustomStyleId || nextCustomStyleId === currentCustomStyleIdRef.current) {
+    const triggerResize = () => window.naver?.maps.Event.trigger?.(map, 'resize');
+    const timers = [0, 120, 300, 520].map((delay) => window.setTimeout(triggerResize, delay));
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, [sidebarOpen, selectedApartment?.id]);
+
+  useEffect(() => {
+    const element = mapElementRef.current;
+    const map = mapRef.current;
+    if (!element || !map || !window.ResizeObserver) {
       return;
     }
 
-    map.setOptions({
-      gl: true,
-      customStyleId: nextCustomStyleId,
+    const observer = new ResizeObserver(() => {
+      window.naver?.maps.Event.trigger?.(map, 'resize');
     });
-    currentCustomStyleIdRef.current = nextCustomStyleId;
-  }, [settings.showSubwayStations, settings.styleKey]);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [status]);
 
-  function applyPreset(styleKey: StylePresetKey) {
-    const preset = getStylePreset(styleKey);
-    setSettings((current) => ({
-      ...current,
-      styleKey,
-      homeMarkerColor: preset.accentColor,
-      subwayMarkerColor: styleKey === 'transit' ? '#0ea5e9' : current.subwayMarkerColor,
-    }));
+  useEffect(() => {
+    if (!selectedApartment) {
+      setCompareSummary([]);
+      return;
+    }
+
+    let cancelled = false;
+    getNearbyFeatures(selectedApartment.id, facilityCategoryKeys, 1000)
+      .then((result) => {
+        if (!cancelled) {
+          setCompareSummary(result.summary);
+          setConditionFeatures(result.features);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCompareSummary([]);
+          setConditionFeatures([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedApartment?.id]);
+
+  useEffect(() => {
+    if (!conditionCandidates.length || selectedDestination) return;
+    const restored = conditionCandidates.find((item) => item.id === savedDestinationIdRef.current);
+    if (restored && getSavedConditionState()?.conditionStep === 'route') {
+      setSelectedDestination(restored);
+      setConditionStep('route');
+    }
+    savedDestinationIdRef.current = undefined;
+  }, [conditionCandidates, selectedDestination]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !window.naver?.maps) {
+      return;
+    }
+
+    facilityMarkerRefs.current.forEach(({ marker }) => marker.setMap(null));
+    if (mapView === 'condition') {
+      facilityMarkerRefs.current = [];
+      return;
+    }
+    facilityMarkerRefs.current = displayMarkers.map((item) => {
+      const filter = facilityFilters.find((f) => f.key === item.category);
+      const icon = filter?.icon ?? '📍';
+      const marker = new window.naver!.maps.Marker({
+        position: new window.naver!.maps.LatLng(item.latitude, item.longitude),
+        map,
+        title: item.name,
+        icon:
+          item.count > 1
+            ? getClusterMarkerIcon(item.count)
+            : getMarkerIcon(icon, facilityColors[item.category] ?? '#355b4e', 'facility'),
+        zIndex: item.count > 1 ? 80 : 40,
+      });
+      window.naver!.maps.Event.addListener(marker, 'click', (event?: { stop?: () => void }) => {
+        event?.stop?.();
+        if (item.count === 1) {
+          setSelectedFacility(item.features[0]);
+          return;
+        }
+
+        setSelectedFacility({
+          ...item.features[0],
+          id: item.id,
+          name: item.name,
+          latitude: item.latitude,
+          longitude: item.longitude,
+          distance_m: null,
+          metadata: {
+            ...item.features[0].metadata,
+            count: item.count,
+          },
+        });
+      });
+      return { marker, item };
+    });
+
+    return () => {
+      facilityMarkerRefs.current.forEach(({ marker }) => marker.setMap(null));
+      facilityMarkerRefs.current = [];
+    };
+  }, [displayMarkers, mapView]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    conditionMarkerRefs.current.forEach((marker) => marker.setMap(null));
+    conditionMarkerRefs.current = [];
+    if (mapView !== 'condition' || !map || !window.naver?.maps || !selectedApartment) return;
+
+    const visibleCandidates = conditionCandidates.filter((item) => visibleConditionCategories.includes(item.category));
+    conditionMarkerRefs.current = visibleCandidates.map((destination) => {
+        const isSelected = destination.id === selectedDestination?.id;
+        const marker = new window.naver!.maps.Marker({
+          position: new window.naver!.maps.LatLng(destination.latitude, destination.longitude),
+          map,
+          title: destination.name,
+          zIndex: isSelected ? 100 : 90,
+          icon: {
+            content: `<button class="condition-map-label${isSelected ? ' condition-map-label--selected' : ''}" type="button"><span>🏫</span><b>${escapeHtml(destination.name)}</b><small>도보 ${destination.minutes}분 · ${destination.distance}m</small></button>`,
+            anchor: new window.naver!.maps.Point(82, 28),
+          },
+        });
+        window.naver!.maps.Event.addListener(marker, 'click', () => selectDestination(destination));
+        return marker;
+      });
+    return () => {
+      conditionMarkerRefs.current.forEach((marker) => marker.setMap(null));
+      conditionMarkerRefs.current = [];
+    };
+  }, [conditionCandidates, conditionStep, mapView, selectedApartment, selectedDestination, visibleConditionCategories]);
+
+  useEffect(() => {
+    if (!selectedApartment) {
+      return;
+    }
+
+    void refreshFeaturesByBounds(activeCategories);
+  }, [selectedApartment?.id, activeCategories]);
+
+  async function refreshFeaturesByBounds(categories: FacilityCategory[]) {
+    if (categories.length === 0) {
+      featureRequestIdRef.current += 1;
+      setFeatures([]);
+      setSummary([]);
+      setSelectedFacility(null);
+      setDataStatus('idle');
+      return;
+    }
+
+    const bounds = mapRef.current?.getBounds?.() as BoundsLike | undefined;
+    if (!bounds) {
+      return;
+    }
+
+    const sw = bounds.getSW();
+    const ne = bounds.getNE();
+    const boundsKey = [
+      sw.lat().toFixed(4),
+      sw.lng().toFixed(4),
+      ne.lat().toFixed(4),
+      ne.lng().toFixed(4),
+      categories.join(','),
+    ].join(':');
+    if (lastBoundsRequestKeyRef.current === boundsKey) {
+      return;
+    }
+    lastBoundsRequestKeyRef.current = boundsKey;
+
+    const requestId = featureRequestIdRef.current + 1;
+    featureRequestIdRef.current = requestId;
+    setDataStatus('loading');
+
+    try {
+      const result = await getFeaturesInBounds(
+        {
+          swLat: sw.lat(),
+          swLng: sw.lng(),
+          neLat: ne.lat(),
+          neLng: ne.lng(),
+        },
+        categories,
+        mapRef.current?.getZoom?.() ?? currentZoom,
+      );
+      if (featureRequestIdRef.current !== requestId) {
+        return;
+      }
+      setFeatures(result.features);
+      setSummary(result.summary);
+      setDataStatus('idle');
+    } catch {
+      if (featureRequestIdRef.current === requestId) {
+        setDataStatus('error');
+      }
+    }
   }
 
-  const canHideBaseTransit = Boolean(env.naverMapsNoTransitStyleId);
+  function selectApartment(apartment: ApartmentSummary) {
+    setSelectedApartment(apartment);
+    setSidebarOpen(false);
+    setSelectedFacility(null);
+    setSelectedDestination(null);
+    setConditionStep('select');
+
+    const map = mapRef.current;
+    if (window.naver?.maps && map) {
+      const center = new window.naver.maps.LatLng(apartment.latitude, apartment.longitude);
+      map.setCenter?.(center);
+      map.setZoom?.(17);
+      window.naver.maps.Event.trigger?.(map, 'resize');
+
+      if (!apartmentMarkerRef.current) {
+        apartmentMarkerRef.current = new window.naver.maps.Marker({
+          position: center,
+          map,
+          title: apartment.name,
+          icon: getMarkerIcon('집', facilityColors.home, 'home', waezipHomeMarker),
+          zIndex: 10000,
+        });
+      } else {
+        apartmentMarkerRef.current.setPosition?.(center);
+        apartmentMarkerRef.current.setMap(map);
+        apartmentMarkerRef.current.setZIndex?.(10000);
+      }
+    }
+  }
+
+  async function selectFromSearch(term: string) {
+    const normalized = term.trim();
+    if (!normalized) {
+      return;
+    }
+
+    setDataStatus('loading');
+    try {
+      const items = await searchApartments(normalized, 20);
+      setApartmentOptions(items);
+      if (items[0]) {
+        selectApartment(items[0]);
+        setSearchTerm('');
+        setTopSearchOpen(false);
+      }
+      setDataStatus('idle');
+    } catch {
+      setDataStatus('error');
+    }
+  }
+
+  function openSidebar() {
+    setSidebarOpen(true);
+    setSelectedFacility(null);
+  }
+
+  function changeFilter(nextFilter: FacilityKey) {
+    if (nextFilter === 'all') {
+      setActiveFilters((current) =>
+        current.length === facilityCategoryKeys.length ? [] : [...facilityCategoryKeys],
+      );
+    } else {
+      setActiveFilters((current) =>
+        current.includes(nextFilter)
+          ? current.filter((filter) => filter !== nextFilter)
+          : [...current, nextFilter],
+      );
+    }
+    setAnimatedFilter(nextFilter);
+    setSelectedFacility(null);
+    window.setTimeout(() => setAnimatedFilter(null), 420);
+  }
+
+  function resetFilters() {
+    setActiveFilters(defaultActiveFilters);
+    setAnimatedFilter('all');
+    setSelectedFacility(null);
+    window.setTimeout(() => setAnimatedFilter(null), 420);
+  }
+
+  function selectSuggestion(apartment: ApartmentSummary) {
+    selectApartment(apartment);
+    setSearchTerm('');
+    setTopSearchOpen(false);
+  }
+
+  function selectDestination(destination: ConditionDestination) {
+    setSelectedDestination(destination);
+    setConditionStep('route');
+    setDestinationMenuOpen(false);
+    setSelectedFacility(null);
+  }
+
+  function resetDestination() {
+    setSelectedDestination(null);
+    setConditionStep('select');
+  }
+
+  function toggleConditionCategory(category: ConditionCategory) {
+    setVisibleConditionCategories((current) => current.includes(category)
+      ? current.filter((item) => item !== category)
+      : [...current, category]);
+  }
 
   return (
-    <section className="map-preview" aria-label="Naver Maps preview">
-      <div className="section-heading">
-        <p className="eyebrow">Naver Maps Test</p>
-        <h1>기본 지도를 먼저 확인해요</h1>
-        <p>
-          신정권역을 기준으로 네이버 지도 SDK 로드와 마커 표시가 정상 동작하는지
-          확인하는 초기 페이지입니다.
-        </p>
-      </div>
+    <section className="family-map-page" aria-label="이집 어때요 생활 지도">
+      <header className="family-map-bar">
+        <button aria-label="왜집 홈" className="family-map-logo" onClick={onBackHome} type="button">
+          <img alt="왜집?" src={waezipLogo} />
+        </button>
+        <button aria-label="처음 화면으로 돌아가기" className="family-map-back" onClick={onBackHome} type="button">‹</button>
+        <nav className="map-view-tabs" aria-label="지도 종류">
+          <button className={mapView === 'life' ? 'is-active' : ''} onClick={() => setMapView('life')} type="button">생활환경 지도</button>
+          <button className={mapView === 'condition' ? 'is-active' : ''} onClick={() => { setMapView('condition'); setSidebarOpen(false); setVisibleConditionCategories((current) => Array.from(new Set([...current, 'school', 'childcare']))); }} type="button">조건 지도</button>
+        </nav>
+        <div className={topSearchOpen ? 'top-search top-search--expanded' : 'top-search'}>
+          <button
+            aria-label="아파트 검색 열기"
+            className="search-toggle"
+            onClick={() => setTopSearchOpen((current) => !current)}
+            type="button"
+          >
+            ⌕
+          </button>
+          <form
+            className="search-slide"
+            onSubmit={(event) => {
+              event.preventDefault();
+              selectFromSearch(searchTerm);
+            }}
+          >
+            <input
+              aria-label="기준 아파트 검색"
+              onChange={(event) => setSearchTerm(event.target.value)}
+              placeholder="아파트를 입력해주세요!"
+              value={searchTerm}
+            />
+            <button type="submit">검색</button>
+            {topApartmentSuggestions.length > 0 && (
+              <div className="apartment-suggestions" role="listbox">
+                {topApartmentSuggestions.map((apartment) => (
+                  <button key={apartment.id} onMouseDown={(event) => event.preventDefault()} onClick={() => selectSuggestion(apartment)} role="option" type="button">
+                    <span aria-hidden="true">집</span>
+                    <b>{apartment.name}</b>
+                    <small>{apartment.address}</small>
+                  </button>
+                ))}
+              </div>
+            )}
+          </form>
+        </div>
+      </header>
 
-      <div className="map-shell">
-        <div className="map-canvas" ref={mapElementRef}>
-          <div className="map-floating-actions">
-            <button
-              aria-expanded={settingsOpen}
-              aria-label="지도 설정"
-              className="map-settings-trigger"
-              onClick={() => setSettingsOpen((current) => !current)}
-              type="button"
-            >
-              ⚙
-            </button>
+      <div className={sidebarOpen ? 'map-layout map-layout--sidebar-open' : 'map-layout'}>
+        <aside className="apartment-sidebar" aria-label="아파트 선택과 비교">
+          <button aria-label="아파트 선택 닫기" className="sidebar-close" onClick={() => setSidebarOpen(false)} type="button">
+            ‹
+          </button>
+          <div className="sidebar-head">
+            <span aria-hidden="true">🏢</span>
+            <div>
+              <b>아파트를 먼저 선택하세요</b>
+              <small>선택한 아파트가 지도의 기준점이 됩니다.</small>
+            </div>
           </div>
 
-          {settingsOpen && (
-            <div className="map-style-popover" role="dialog" aria-label="지도 스타일 설정">
-              <div className="map-style-header">
-                <div>
-                  <p className="eyebrow">Map Style</p>
-                  <h2>지도 표시 설정</h2>
-                </div>
-                <button
-                  aria-label="지도 설정 닫기"
-                  className="map-style-close"
-                  onClick={() => setSettingsOpen(false)}
-                  type="button"
-                >
-                  ×
-                </button>
+          <form
+            className="sidebar-search"
+            onSubmit={(event) => {
+              event.preventDefault();
+              selectFromSearch(searchTerm);
+            }}
+          >
+            <input
+              aria-label="사이드바 아파트 검색"
+              onChange={(event) => setSearchTerm(event.target.value)}
+              placeholder="아파트 이름을 입력하세요"
+              value={searchTerm}
+            />
+            <button type="submit">검색</button>
+            {sidebarApartmentSuggestions.length > 0 && (
+              <div className="apartment-suggestions" role="listbox">
+                {sidebarApartmentSuggestions.map((apartment) => (
+                  <button key={apartment.id} onMouseDown={(event) => event.preventDefault()} onClick={() => selectSuggestion(apartment)} role="option" type="button">
+                    <span aria-hidden="true">집</span>
+                    <b>{apartment.name}</b>
+                    <small>{apartment.address}</small>
+                  </button>
+                ))}
               </div>
+            )}
+          </form>
 
-              <section className="style-editor-section">
-                <h3>지도 템플릿</h3>
-                <div className="style-preset-grid">
-                  {mapStylePresets.map((preset) => (
-                    <button
-                      className={
-                        settings.styleKey === preset.key
-                          ? 'style-preset-button style-preset-button--active'
-                          : 'style-preset-button'
-                      }
-                      key={preset.key}
-                      onClick={() => applyPreset(preset.key)}
-                      style={
-                        {
-                          '--preset-color': preset.accentColor,
-                          '--preset-surface': preset.surfaceColor,
-                        } as CSSProperties
-                      }
-                      type="button"
-                    >
-                      <span className="style-preset-swatch" />
-                      <strong>{preset.label}</strong>
-                      <small>{preset.customStyleId ? 'Style ID 연결됨' : 'Style ID 미설정'}</small>
-                    </button>
-                  ))}
-                </div>
-                <p className="style-helper">
-                  기본값은 네이버 기본 지도입니다. 커스텀 지도 색상은 Naver Style Editor에서 발행한
-                  Metadata ID가 있는 프리셋을 선택할 때만 적용됩니다.
-                </p>
-                {!settings.showSubwayStations && !canHideBaseTransit && (
-                  <p className="style-warning">
-                    샘플 지하철역 마커는 숨겨졌습니다. 네이버 기본 지도에 포함된 지하철역 POI까지
-                    숨기려면 `VITE_NAVER_MAPS_NO_TRANSIT_STYLE_ID`가 필요합니다.
-                  </p>
-                )}
-              </section>
-
-              <section className="style-editor-section">
-                <h3>지도 위 표시</h3>
-                <label className="style-toggle">
-                  <input
-                    checked={settings.showSubwayStations}
-                    onChange={(event) =>
-                      setSettings((current) => ({ ...current, showSubwayStations: event.target.checked }))
-                    }
-                    type="checkbox"
-                  />
-                  <span>
-                    <strong>지하철역 표시</strong>
-                    <small>
-                      주변 지하철역 오버레이를 표시합니다. 숨김용 Style ID가 있으면 기본 지도 POI도 함께 줄입니다.
-                    </small>
-                  </span>
-                </label>
-                <label className="style-toggle">
-                  <input
-                    checked={settings.showHomeMarker}
-                    onChange={(event) =>
-                      setSettings((current) => ({ ...current, showHomeMarker: event.target.checked }))
-                    }
-                    type="checkbox"
-                  />
-                  <span>
-                    <strong>기준 위치 표시</strong>
-                    <small>신정권역 기준 마커를 표시합니다.</small>
-                  </span>
-                </label>
-              </section>
-
-              <section className="style-editor-section">
-                <h3>표시 색상</h3>
-                <label className="color-setting">
-                  <span>기준 위치</span>
-                  <input
-                    aria-label="기준 위치 색상"
-                    onChange={(event) =>
-                      setSettings((current) => ({ ...current, homeMarkerColor: event.target.value }))
-                    }
-                    type="color"
-                    value={settings.homeMarkerColor}
-                  />
-                </label>
-                <label className="color-setting">
-                  <span>지하철역</span>
-                  <input
-                    aria-label="지하철역 색상"
-                    onChange={(event) =>
-                      setSettings((current) => ({ ...current, subwayMarkerColor: event.target.value }))
-                    }
-                    type="color"
-                    value={settings.subwayMarkerColor}
-                  />
-                </label>
-              </section>
-
+          <div className="apartment-list">
+            {sidebarApartmentOptions.map((apartment) => (
               <button
-                className="settings-reset-button"
-                onClick={() => setSettings(operatorMapDefaults)}
+                className="apartment-option"
+                key={apartment.id}
+                onClick={() => selectApartment(apartment)}
                 type="button"
               >
-                운영 표시 기본값으로 되돌리기
+                <span aria-hidden="true">🏙️</span>
+                <div>
+                  <b>{apartment.name}</b>
+                  <small>{apartment.address}</small>
+                </div>
               </button>
+            ))}
+          </div>
+
+          <section className="sidebar-compare" aria-label="아파트 비교">
+            <h3>아파트 비교</h3>
+            <b>{selectedApartment?.name ?? '기준 아파트 미선택'}</b>
+            <small className="compare-radius-note">선택 아파트 1km 이내 기준</small>
+            <select
+              aria-label="비교 아파트 선택"
+              onChange={(event) => setCompareTarget(event.target.value)}
+              value={compareTarget}
+            >
+              <option value="">비교 아파트 선택</option>
+              {compareApartmentOptions.map((apartment) => (
+                <option key={apartment.id} value={apartment.id}>
+                  {apartment.name}
+                </option>
+              ))}
+            </select>
+            <div className="facts">
+              {summaryItems.map((item) => (
+                <div className="fact" key={item.key}>
+                  <small>{item.label}</small>
+                  <b>{item.value}</b>
+                  <span>{compareTarget ? '비교 준비 중' : '1km 이내'}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="sidebar-memo">
+            <h3>비교 분석 메모</h3>
+            <textarea placeholder="비교하며 발견한 점을 기록하세요." />
+            <button type="button">메모 저장</button>
+          </section>
+
+          <button className="go-note" onClick={onOpenInvestment} type="button">
+            <span aria-hidden="true">📝</span>
+            <div>
+              <b>왜집의 임장노트</b>
+              <small>투자 관점으로 이동하기</small>
+            </div>
+            <i>→</i>
+          </button>
+        </aside>
+
+        <div className="map-stage">
+          {!sidebarOpen && (
+            <button className="sidebar-open-button" onClick={openSidebar} type="button">
+              🏢 <span>아파트 선택</span>
+            </button>
+          )}
+
+          {selectedApartment && !sidebarOpen && mapView === 'life' && (
+            <div className="map-facility-panel">
+              <div className="facility-heading">
+                <div>
+                  <b>무엇을 지도에서 볼까요?</b>
+                  <p className="apartment-mini-summary">
+                    <span>어린이시설 {getSummaryCount(summary, 'kids')}곳</span>
+                    <span>학교 {getSummaryCount(summary, 'school')}곳</span>
+                    <span>보행신호 {getSummaryCount(summary, 'signal')}개</span>
+                  </p>
+                </div>
+                <button onClick={openSidebar} type="button">🏢 아파트 다시 선택</button>
+              </div>
+              <div className="facility-filters" aria-label="시설 필터">
+                {facilityFilters.map((filter) => (
+                  <button
+                    className={[
+                      (
+                        filter.key === 'all'
+                          ? activeFilters.length === facilityCategoryKeys.length
+                          : activeFilters.includes(filter.key)
+                      )
+                        ? 'facility-filter facility-filter--active'
+                        : 'facility-filter',
+                      animatedFilter === filter.key ? 'facility-filter--pop' : '',
+                    ].join(' ')}
+                    key={filter.key}
+                    onClick={() => changeFilter(filter.key)}
+                    type="button"
+                  >
+                    <span aria-hidden="true">{filter.icon}</span>
+                    {filter.label}
+                  </button>
+                ))}
+                <button className="facility-filter facility-filter--reset" onClick={resetFilters} type="button">
+                  <span aria-hidden="true">↺</span>
+                  초기화
+                </button>
+              </div>
             </div>
           )}
 
-          {status === 'missing-key' && (
-            <div className="map-message">
-              <strong>지도 키 설정이 필요합니다.</strong>
-              <span>프론트 `.env`에 `VITE_NAVER_MAPS_CLIENT_ID`를 추가하세요.</span>
-            </div>
+          {selectedApartment && !sidebarOpen && mapView === 'condition' && (
+            <>
+              <section className="condition-summary" aria-label="조건 지도 요약">
+                <div><small>선택 단지</small><b>{selectedApartment.name}</b><span>→</span><strong>{conditionStep === 'route' ? '보행 조건' : '목적지 선택'}</strong></div>
+                <p>{selectedDestination ? `${selectedDestination.name}까지 도보 ${selectedDestination.minutes}분 · ${selectedDestination.distance}m` : '학교·유치원·어린이집 등 목적지를 선택하세요.'}</p>
+                {selectedDestination && <button onClick={resetDestination} type="button">목적지 초기화</button>}
+              </section>
+
+              <aside className="condition-apartment-card">
+                <small>선택 단지</small><h2>{selectedApartment.name}</h2><p>{selectedApartment.address}</p>
+                <dl>
+                  {selectedDestination ? <><div><dt>통학 목적지</dt><dd>{selectedDestination.name}</dd></div><div><dt>도보 시간</dt><dd>{selectedDestination.minutes}분</dd></div><div><dt>횡단보도</dt><dd>{selectedDestination.crosswalks}개</dd></div><div><dt>보행신호</dt><dd>{selectedDestination.signals}개</dd></div><div><dt>CCTV</dt><dd>{selectedDestination.cctv}개</dd></div></> : <><div><dt>현재 상태</dt><dd>목적지 선택 전</dd></div><div><dt>분석 기준</dt><dd>실제 시설 좌표·큰길 경로</dd></div></>}
+                </dl>
+                <button onClick={onOpenInvestment} type="button">단지 상세 보기</button>
+              </aside>
+
+              <aside className="condition-control-card">
+                <div className="condition-control-title"><div><small>{conditionStep === 'route' ? '선택한 경로' : '목적지 탐색'}</small><h2>{conditionStep === 'route' ? '조건 분석' : '어디로 갈까요?'}</h2></div><button onClick={() => setDestinationMenuOpen((open) => !open)} type="button">✨</button></div>
+                {conditionStep === 'route' && selectedDestination ? <div className="condition-metrics"><div><span>🚶</span><small>도보 시간</small><b>{selectedDestination.minutes}분</b></div><div><span>🚸</span><small>횡단보도</small><b>{selectedDestination.crosswalks}개</b></div><div><span>🚦</span><small>보행신호</small><b>{selectedDestination.signals}개</b></div><div><span>📹</span><small>CCTV</small><b>{selectedDestination.cctv}개</b></div><button onClick={resetDestination} type="button">다른 목적지 선택</button></div> : <div className="condition-categories">{([['school','학교','🏫'],['park','공원','🌳'],['childcare','유치원·어린이집','🧸'],['hospital','병원','🏥']] as const).map(([key,label,icon]) => <button className={visibleConditionCategories.includes(key) ? 'is-active' : ''} key={key} onClick={() => toggleConditionCategory(key)} type="button"><span>{icon}</span>{label}<small>{visibleConditionCategories.includes(key) ? '표시 중' : '선택'}</small></button>)}</div>}
+                {destinationMenuOpen && <div className="destination-menu">{conditionCandidates.map((item) => <button key={item.id} onClick={() => selectDestination(item)} type="button"><span>🏫 {item.name}</span><small>도보 {item.minutes}분 · {item.distance}m</small></button>)}</div>}
+              </aside>
+              {conditionStep === 'select' && conditionCandidates.length === 0 && <div className="condition-empty">주변 학교·어린이집 정보를 불러오는 중입니다.</div>}
+            </>
           )}
-          {status === 'loading' && <div className="map-message">네이버 지도를 불러오는 중입니다.</div>}
-          {status === 'error' && (
+
+          <div className="family-naver-map" ref={mapElementRef}>
+            {status === 'missing-key' && (
+              <div className="map-message">
+                <strong>지도 키 설정이 필요합니다.</strong>
+                <span>프론트 `.env`에 `VITE_NAVER_MAPS_CLIENT_ID`를 추가하세요.</span>
+              </div>
+            )}
+            {status === 'loading' && <div className="map-message">네이버 지도를 불러오는 중입니다.</div>}
+            {status === 'error' && (
             <div className="map-message">
               <strong>지도 로드에 실패했습니다.</strong>
               <span>네이버 콘솔의 Web 서비스 URL과 Client ID를 확인하세요.</span>
             </div>
+          )}
+            {status === 'ready' && dataStatus === 'loading' && (
+              <div className="map-message map-message--soft">주변 데이터를 불러오는 중입니다.</div>
+            )}
+            {status === 'ready' && dataStatus === 'error' && (
+              <div className="map-message map-message--soft">
+                <strong>주변 데이터 연결을 확인해주세요.</strong>
+                <span>백엔드 서버와 Supabase 연결 상태를 확인하세요.</span>
+              </div>
+            )}
+          </div>
+
+          {status === 'ready' && !selectedApartment && (
+            <div className="apartment-bubble-layer" aria-label="지도에서 아파트 선택">
+              {sidebarApartmentOptions.map((apartment) => (
+                <button
+                  className="apartment-map-bubble"
+                  key={apartment.id}
+                  onClick={() => selectApartment(apartment)}
+                  title={apartment.name}
+                  type="button"
+                >
+                  {getBubbleApartmentName(apartment.name)}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {selectedApartment && mapView === 'life' && (
+            <div className="map-apartment-caption">
+              <small>현재 기준점</small>
+              <b>{selectedApartment.name}</b>
+              <span>{selectedApartment.address}</span>
+              <em>이 아파트 주변을 살펴보고 있어요</em>
+            </div>
+          )}
+
+          {selectedFacility && (
+            <aside className="map-place-card" aria-label="선택한 시설 정보">
+              <small>{getFeatureLabel(selectedFacility.category)}</small>
+              <b>{selectedFacility.name}</b>
+              <span>{formatFeatureDetail(selectedFacility)}</span>
+            </aside>
           )}
         </div>
       </div>
