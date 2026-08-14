@@ -1,16 +1,9 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { AuthProvider } from '../features/auth/AuthContext';
 import { compareApartments, getNearbyFeatures, searchApartments } from '../services/familyMap';
+import { getNearbyFeatures, searchApartments } from '../services/familyMap';
 import { NaverMapPreview } from './NaverMapPreview';
-
-function renderMap() {
-  return render(
-    <AuthProvider>
-      <NaverMapPreview />
-    </AuthProvider>,
-  );
-}
 
 vi.mock('../services/familyMap', () => ({
   compareApartments: vi.fn(),
@@ -48,6 +41,10 @@ function installNaverMapsMock() {
     setZIndex = vi.fn();
   }
 
+  class PolylineMock {
+    setMap = vi.fn();
+  }
+
   window.naver = {
     maps: {
       LatLng: class {},
@@ -55,6 +52,7 @@ function installNaverMapsMock() {
       Position: { BOTTOM_RIGHT: 'bottom-right' },
       Map: MapMock,
       Marker: MarkerMock,
+      Polyline: PolylineMock,
       Event: {
         addListener: vi.fn((target, eventName, listener) => {
           if (target instanceof MarkerMock && eventName === 'click') {
@@ -168,16 +166,13 @@ describe('NaverMapPreview', () => {
   });
 
   it('loads only the selected apartment nearby facilities within 1km', async () => {
-    renderMap();
+    render(<NaverMapPreview />);
 
     await waitFor(() => {
       expect(searchApartments).toHaveBeenCalledWith('', 1000);
     });
 
-    const sidebarSearchInput = screen.getByPlaceholderText('아파트 이름을 입력하세요');
-    const sidebarSearchForm = sidebarSearchInput.closest('form') as HTMLElement;
-    fireEvent.change(sidebarSearchInput, { target: { value: 'Test' } });
-    fireEvent.click(await within(sidebarSearchForm).findByRole('option', { name: /Test Apartment/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Test Apartment/ }));
 
     await waitFor(() => {
       expect(getNearbyFeatures).toHaveBeenCalledWith(
@@ -186,15 +181,13 @@ describe('NaverMapPreview', () => {
         1000,
       );
     });
+    expect(getNearbyFeatures).toHaveBeenCalledWith('apt-1', ['park'], 3000);
   });
 
   it('zooms in when an apartment is selected and restores the zoom when its marker is clicked again', async () => {
-    renderMap();
+    render(<NaverMapPreview />);
 
-    const sidebarSearchInput = screen.getByPlaceholderText('아파트 이름을 입력하세요');
-    const sidebarSearchForm = sidebarSearchInput.closest('form') as HTMLElement;
-    fireEvent.change(sidebarSearchInput, { target: { value: 'Test' } });
-    fireEvent.click(await within(sidebarSearchForm).findByRole('option', { name: /Test Apartment/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Test Apartment/ }));
     expect(screen.getByText('현재 기준점')).toBeInTheDocument();
     expect(mapSetZoom).toHaveBeenLastCalledWith(15);
 

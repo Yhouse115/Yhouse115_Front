@@ -22,6 +22,8 @@ export type MapFeature = {
   longitude: number;
   address?: string | null;
   distance_m?: number | null;
+  walking_distance_m?: number | null;
+  walking_time_min?: number | null;
   geometry?: Record<string, unknown> | null;
   metadata: Record<string, unknown>;
 };
@@ -97,6 +99,43 @@ export type ApartmentCompareResponse = {
   summary: string[];
 };
 
+export type WalkingRoute = {
+  complexId: string;
+  featureId: string;
+  accessGroup: string;
+  routeCoordinates: Array<[longitude: number, latitude: number]>;
+  walkDistanceMeters: number;
+  walkTimeMinutes: number;
+  routeMethod: string;
+  calculatedAt: string;
+  safetyMatchThresholdMeters?: number | null;
+  crosswalkCount?: number | null;
+  pedestrianSignalCount?: number | null;
+  cctvLocationCount?: number | null;
+  crossingEvents?: WalkingRouteCrossingEvent[] | null;
+};
+
+export type WalkingRouteCrossingEvent = {
+  crosswalkEventId: string;
+  longitude: number;
+  latitude: number;
+  pedestrianSignals: Array<{ id: string; longitude: number; latitude: number }>;
+};
+
+export class ApiRequestError extends Error {
+  constructor(readonly status: number) {
+    super(`API request failed: ${status}`);
+    this.name = 'ApiRequestError';
+  }
+}
+
+export class WalkingRouteNotFoundError extends Error {
+  constructor() {
+    super('Walking route was not found.');
+    this.name = 'WalkingRouteNotFoundError';
+  }
+}
+
 const responseCache = new Map<string, { expiresAt: number; value: unknown }>();
 const pendingRequests = new Map<string, Promise<unknown>>();
 const CACHE_TTL_MS = 20_000;
@@ -122,7 +161,7 @@ async function getJson<T>(path: string, params?: URLSearchParams): Promise<T> {
   const request = fetch(url)
     .then((response) => {
       if (!response.ok) {
-        throw new Error(`API request failed: ${response.status}`);
+        throw new ApiRequestError(response.status);
       }
       return response.json() as Promise<T>;
     })
@@ -234,4 +273,88 @@ export async function compareApartments(
     target_apartment_ids: targetApartmentIds,
     radius_m: radiusM,
   });
+}
+
+function isRouteCoordinate(value: unknown): value is [number, number] {
+  return Array.isArray(value)
+    && value.length === 2
+    && typeof value[0] === 'number'
+    && Number.isFinite(value[0])
+    && typeof value[1] === 'number'
+    && Number.isFinite(value[1]);
+}
+
+function isCrossingEvent(value: unknown): value is WalkingRouteCrossingEvent {
+  if (!value || typeof value !== 'object') return false;
+  const event = value as Partial<WalkingRouteCrossingEvent>;
+  return typeof event.crosswalkEventId === 'string'
+    && event.crosswalkEventId.length > 0
+    && typeof event.longitude === 'number'
+    && Number.isFinite(event.longitude)
+    && typeof event.latitude === 'number'
+    && Number.isFinite(event.latitude)
+    && Array.isArray(event.pedestrianSignals)
+    && event.pedestrianSignals.every((signal) => (
+      !!signal
+      && typeof signal.id === 'string'
+      && signal.id.length > 0
+      && typeof signal.longitude === 'number'
+      && Number.isFinite(signal.longitude)
+      && typeof signal.latitude === 'number'
+      && Number.isFinite(signal.latitude)
+    ));
+}
+
+function mapWalkingRoute(response: WalkingRoute): WalkingRoute {
+  if (
+    !Array.isArray(response.routeCoordinates)
+    || response.routeCoordinates.length < 2
+    || !response.routeCoordinates.every(isRouteCoordinate)
+    || !Number.isFinite(response.walkDistanceMeters)
+    || !Number.isFinite(response.walkTimeMinutes)
+    || (response.safetyMatchThresholdMeters != null && !Number.isFinite(response.safetyMatchThresholdMeters))
+    || (response.crosswalkCount != null && !Number.isFinite(response.crosswalkCount))
+    || (response.pedestrianSignalCount != null && !Number.isFinite(response.pedestrianSignalCount))
+    || (response.cctvLocationCount != null && !Number.isFinite(response.cctvLocationCount))
+    || (response.crossingEvents != null && (!Array.isArray(response.crossingEvents) || !response.crossingEvents.every(isCrossingEvent)))
+  ) {
+    throw new Error('Walking route response is invalid.');
+  }
+
+  return {
+    ...response,
+    routeCoordinates: response.routeCoordinates.map(([longitude, latitude]) => [longitude, latitude]),
+    safetyMatchThresholdMeters: response.safetyMatchThresholdMeters ?? null,
+    crosswalkCount: response.crosswalkCount ?? null,
+    pedestrianSignalCount: response.pedestrianSignalCount ?? null,
+    cctvLocationCount: response.cctvLocationCount ?? null,
+    crossingEvents: response.crossingEvents ?? null,
+  };
+}
+
+function toWalkingRouteFeatureId(featureId: string) {
+  const schoolPrefix = 'elementary_schools:';
+  if (!featureId.startsWith(schoolPrefix)) {
+    return featureId;
+  }
+  return `education_elementary_yangcheon:${featureId.slice(schoolPrefix.length)}`;
+}
+
+export async function getWalkingRoute(complexId: string, featureId: string): Promise<WalkingRoute> {
+  try {
+    const routeFeatureId = toWalkingRouteFeatureId(featureId);
+    const response = await getJson<WalkingRoute>(
+      `/api/v1/complexes/${encodeURIComponent(complexId)}/features/${encodeURIComponent(routeFeatureId)}/walking-route`,
+    );
+    return {
+      ...mapWalkingRoute(response),
+      // The API uses the normalized database ID; the map state uses the marker ID.
+      featureId,
+    };
+  } catch (error) {
+    if (error instanceof ApiRequestError && error.status === 404) {
+      throw new WalkingRouteNotFoundError();
+    }
+    throw error;
+  }
 }
