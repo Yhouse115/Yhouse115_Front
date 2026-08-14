@@ -38,6 +38,7 @@ describe('getWalkingRoute', () => {
       crosswalkCount: 8,
       pedestrianSignalCount: 2,
       cctvLocationCount: 11,
+      crossingEvents: null,
     });
     expect(fetchMock).toHaveBeenCalledWith(
       'http://localhost:8000/api/v1/complexes/complex-1/features/school-1/walking-route',

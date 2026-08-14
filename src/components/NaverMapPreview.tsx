@@ -34,6 +34,13 @@ type ConditionDestination = {
   signals: number;
   cctv: number;
 };
+type RouteSafetyMarker = {
+  id: string;
+  category: 'crosswalk' | 'signal';
+  name: string;
+  latitude: number;
+  longitude: number;
+};
 type WalkingRouteStatus = 'idle' | 'loading' | 'ready' | 'not-found' | 'error';
 
 function supportsStoredWalkingRoute(category: ConditionCategory) {
@@ -548,8 +555,8 @@ export function NaverMapPreview({
         latitude: feature.latitude,
         longitude: feature.longitude,
         address: feature.address,
-        distance: Number.isFinite(storedWalkingDistance) ? Math.round(storedWalkingDistance) : estimatedDistance,
-        minutes: Number.isFinite(storedWalkingTime)
+        distance: typeof storedWalkingDistance === 'number' && Number.isFinite(storedWalkingDistance) ? Math.round(storedWalkingDistance) : estimatedDistance,
+        minutes: typeof storedWalkingTime === 'number' && Number.isFinite(storedWalkingTime)
           ? Math.max(1, Math.ceil(storedWalkingTime))
           : Math.max(1, Math.ceil(estimatedDistance / 75)),
         signals: routeSignals.length,
@@ -571,17 +578,44 @@ export function NaverMapPreview({
     () => selectedDestination && supportsStoredWalkingRoute(selectedDestination.category) ? selectedSchoolRoute : null,
     [selectedDestination, selectedSchoolRoute],
   );
-  const selectedRouteSafetyFeatures = useMemo(() => {
+  const selectedRouteSafetyFeatures = useMemo<RouteSafetyMarker[]>(() => {
     if (!selectedWalkingRoute || selectedWalkingRoute.routeCoordinates.length < 2) {
       return [];
     }
 
+    if (Array.isArray(selectedWalkingRoute.crossingEvents)) {
+      return selectedWalkingRoute.crossingEvents.flatMap((event) => [
+        {
+          id: `crosswalk:${event.crosswalkEventId}`,
+          category: 'crosswalk' as const,
+          name: '실제 통과 횡단보도',
+          latitude: event.latitude,
+          longitude: event.longitude,
+        },
+        ...event.pedestrianSignals.map((signal) => ({
+          id: `signal:${signal.id}`,
+          category: 'signal' as const,
+          name: '실제 통과 횡단보도 보행신호',
+          latitude: signal.latitude,
+          longitude: signal.longitude,
+        })),
+      ]);
+    }
+
     const route = selectedWalkingRoute.routeCoordinates.map(([longitude, latitude]) => ({ latitude, longitude }));
     const safetyThresholdMeters = selectedWalkingRoute.safetyMatchThresholdMeters ?? routeSafetyProximityMeters;
-    return conditionFeatures.filter((feature) =>
-      (feature.category === 'crosswalk' || feature.category === 'signal')
-      && distanceToRoute(feature, route) <= safetyThresholdMeters,
-    );
+    return conditionFeatures
+      .filter((feature): feature is MapFeature & { category: 'crosswalk' | 'signal' } => (
+        (feature.category === 'crosswalk' || feature.category === 'signal')
+        && distanceToRoute(feature, route) <= safetyThresholdMeters
+      ))
+      .map((feature) => ({
+        id: feature.id,
+        category: feature.category,
+        name: feature.name,
+        latitude: feature.latitude,
+        longitude: feature.longitude,
+      }));
   }, [conditionFeatures, selectedWalkingRoute]);
   const selectedDestinationCrosswalks = selectedWalkingRoute
     ? selectedWalkingRoute.crosswalkCount ?? selectedRouteSafetyFeatures.filter((feature) => feature.category === 'crosswalk').length
