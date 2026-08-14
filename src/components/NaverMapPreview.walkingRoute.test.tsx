@@ -1,7 +1,16 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
+import { AuthProvider } from '../features/auth/AuthContext';
 import { getNearbyFeatures, getWalkingRoute, searchApartments } from '../services/familyMap';
 import { NaverMapPreview } from './NaverMapPreview';
+
+function renderMap() {
+  return render(
+    <AuthProvider>
+      <NaverMapPreview />
+    </AuthProvider>,
+  );
+}
 
 vi.mock('../services/familyMap', () => ({
   getNearbyFeatures: vi.fn(),
@@ -60,7 +69,7 @@ describe('NaverMapPreview walking route', () => {
   });
 
   it('requests the selected school route and displays its distance and time', async () => {
-    render(<NaverMapPreview />);
+    renderMap();
 
     fireEvent.click((await screen.findAllByRole('button', { name: /Test Apartment/ }))[0]);
     await waitFor(() => expect(getNearbyFeatures).toHaveBeenCalled());
