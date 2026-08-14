@@ -10,7 +10,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(isSupabaseConfigured);
 
   useEffect(() => {
-    if (!isSupabaseConfigured) {
+    if (!isSupabaseConfigured || !supabase) {
       return;
     }
 
@@ -31,7 +31,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       session,
       isLoading,
       signInWithGoogle: async () => {
-        if (!isSupabaseConfigured) {
+        if (!isSupabaseConfigured || !supabase) {
           logger.warn('supabase_not_configured', { action: 'signInWithGoogle' });
           return;
         }
@@ -44,7 +44,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       },
       signOut: async () => {
-        if (!isSupabaseConfigured) {
+        if (!isSupabaseConfigured || !supabase) {
           logger.warn('supabase_not_configured', { action: 'signOut' });
           return;
         }

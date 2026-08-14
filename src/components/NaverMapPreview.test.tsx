@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 
 import { AuthProvider } from '../features/auth/AuthContext';
 import { compareApartments, getNearbyFeatures, searchApartments } from '../services/familyMap';
+import { getInvestmentMarketSummary } from '../services/investmentMarket';
 import { NaverMapPreview } from './NaverMapPreview';
 
 function renderMap() {
@@ -17,6 +18,26 @@ vi.mock('../services/familyMap', () => ({
   getNearbyFeatures: vi.fn(),
   searchApartments: vi.fn(),
 }));
+
+vi.mock('../services/investmentMarket', () => ({
+  formatAmountManwon: (value: number | null) => (value == null ? '-' : `${value}만`),
+  getInvestmentMarketSummary: vi.fn(),
+}));
+
+beforeEach(() => {
+  vi.mocked(getInvestmentMarketSummary).mockResolvedValue({
+    averageTradeAmount: 84000,
+    averageJeonseDeposit: 32500,
+    recentTradeCount: 2,
+    recentJeonseCount: 3,
+    tradeChangeRate: 1.2,
+    jeonseChangeRate: -0.8,
+    baseTradeAmount: 83000,
+    baseJeonseDeposit: 32700,
+    areaRows: [],
+    trend: [],
+  });
+});
 
 vi.mock('../config/env', () => ({
   env: {

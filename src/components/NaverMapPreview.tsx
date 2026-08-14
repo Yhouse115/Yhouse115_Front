@@ -17,8 +17,14 @@ import {
   WalkingRouteNotFoundError,
 } from '../services/familyMap';
 import { logger } from '../services/logger';
+import {
+  formatAmountManwon,
+  getInvestmentMarketSummary,
+  type InvestmentMarketSummary,
+} from '../services/investmentMarket';
 
 type MapStatus = 'loading' | 'ready' | 'missing-key' | 'error';
+type MarketStatus = 'idle' | 'loading' | 'ready' | 'error';
 type FacilityKey = 'all' | 'kids' | 'school' | 'crosswalk' | 'signal' | 'cctv' | 'risk';
 type ActiveFacilityKey = Exclude<FacilityKey, 'all'>;
 type MapView = 'life' | 'condition';
@@ -614,6 +620,10 @@ export function NaverMapPreview({
   const [conditionFeatures, setConditionFeatures] = useState<MapFeature[]>([]);
   const [visibleConditionCategories, setVisibleConditionCategories] = useState<ConditionCategory[]>(() => getSavedConditionState()?.visibleCategories ?? ['school', 'childcare', 'park', 'hospital']);
   const [destinationMenuOpen, setDestinationMenuOpen] = useState(false);
+  const [conditionNoteReady, setConditionNoteReady] = useState(false);
+  const [noteGateMessage, setNoteGateMessage] = useState('');
+  const [marketStatus, setMarketStatus] = useState<MarketStatus>('idle');
+  const [marketSummary, setMarketSummary] = useState<InvestmentMarketSummary | null>(null);
 
   const activeCategories = useMemo(() => getActiveCategories(activeFilters), [activeFilters]);
   const evidenceFeatures = useMemo(() => {
@@ -1124,6 +1134,32 @@ export function NaverMapPreview({
   }, [selectedApartment?.id, selectedDestination?.category, selectedDestination?.id]);
 
   useEffect(() => {
+    if (!conditionNoteReady || !selectedApartment) {
+      setMarketStatus('idle');
+      setMarketSummary(null);
+      return;
+    }
+
+    let cancelled = false;
+    setMarketStatus('loading');
+    getInvestmentMarketSummary(selectedApartment.name)
+      .then((summary) => {
+        if (cancelled) return;
+        setMarketSummary(summary);
+        setMarketStatus('ready');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setMarketSummary(null);
+        setMarketStatus('error');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [conditionNoteReady, selectedApartment]);
+
+  useEffect(() => {
     const map = mapRef.current;
     walkingRoutePolylineRef.current?.setMap(null);
     walkingRoutePolylineRef.current = null;
@@ -1156,7 +1192,7 @@ export function NaverMapPreview({
     }
 
     facilityMarkerRefs.current.forEach(({ marker }) => marker.setMap(null));
-    if (mapView === 'condition') {
+    if (mapView === 'condition' || !selectedApartment) {
       facilityMarkerRefs.current = [];
       return;
     }
@@ -1200,7 +1236,7 @@ export function NaverMapPreview({
       facilityMarkerRefs.current.forEach(({ marker }) => marker.setMap(null));
       facilityMarkerRefs.current = [];
     };
-  }, [displayMarkers, mapView]);
+  }, [displayMarkers, mapView, selectedApartment]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1290,6 +1326,8 @@ export function NaverMapPreview({
     setCompareResultOpen(false);
     setComparisonFeatureSets([]);
     setMapEvidenceMetric(null);
+    setConditionNoteReady(false);
+    setNoteGateMessage('');
 
     const map = mapRef.current;
     if (window.naver?.maps && map) {
@@ -1372,6 +1410,9 @@ export function NaverMapPreview({
   }
 
   function openSidebar() {
+    if (selectedApartment) {
+      deselectApartment();
+    }
     setSidebarOpen(true);
     setSelectedFacility(null);
     setPreviewApartment(null);
@@ -1527,6 +1568,16 @@ export function NaverMapPreview({
     setVisibleConditionCategories((current) => current.includes(category)
       ? current.filter((item) => item !== category)
       : [...current, category]);
+  }
+
+  function openInvestmentNote() {
+    if (!selectedApartment) {
+      setNoteGateMessage('먼저 아파트를 선택해 주세요.');
+      return;
+    }
+
+    setNoteGateMessage('');
+    onOpenInvestment?.();
   }
 
   return (
@@ -1784,14 +1835,19 @@ export function NaverMapPreview({
             <button type="button">메모 저장</button>
           </section>
 
-          <button className="go-note" onClick={onOpenInvestment} type="button">
-            <span aria-hidden="true">📝</span>
-            <div>
-              <b>왜집의 임장노트</b>
-              <small>투자 관점으로 이동하기</small>
-            </div>
-            <i>→</i>
-          </button>
+          {mapView === 'life' && (
+            <>
+              <button className="go-note" onClick={openInvestmentNote} type="button">
+                <span aria-hidden="true">📝</span>
+                <div>
+                  <b>왜집의 임장노트</b>
+                  <small>{selectedApartment ? `${selectedApartment.name} 상세 보기` : '아파트 선택 후 이용할 수 있어요'}</small>
+                </div>
+                <i>→</i>
+              </button>
+              <p className="note-gate-message" aria-live="polite">{noteGateMessage}</p>
+            </>
+          )}
         </aside>
 
         <div className="map-stage">
@@ -1857,13 +1913,64 @@ export function NaverMapPreview({
                 {selectedDestination && <button onClick={resetDestination} type="button">목적지 초기화</button>}
               </section>
 
-              <aside className="condition-apartment-card">
+              {!conditionNoteReady && <aside className="condition-apartment-card">
                 <small>선택 단지</small><h2>{selectedApartment.name}</h2><p>{selectedApartment.address}</p>
                 <dl>
                   {selectedDestination ? <><div><dt>통학 목적지</dt><dd>{selectedDestination.name}</dd></div><div><dt>도보 시간</dt><dd>{selectedDestinationMinutes}분</dd></div><div><dt>횡단보도</dt><dd>{selectedDestinationCrosswalks}개</dd></div><div><dt>보행신호</dt><dd>{selectedDestinationSignals}개</dd></div><div><dt>CCTV</dt><dd>{selectedDestinationCctv}개</dd></div></> : <><div><dt>현재 상태</dt><dd>목적지 선택 전</dd></div><div><dt>분석 기준</dt><dd>실제 시설 좌표·큰길 경로</dd></div></>}
                 </dl>
-                <button onClick={onOpenInvestment} type="button">단지 상세 보기</button>
-              </aside>
+                <button onClick={() => setConditionNoteReady(true)} type="button">단지 상세 보기</button>
+              </aside>}
+
+              {conditionNoteReady && (
+                <aside className="condition-market-panel" aria-label="선택 단지 거래동향">
+                  <div className="market-strip-title">
+                    <small>거래동향</small>
+                    <b>{selectedApartment.name}</b>
+                    <span>최근 3개월</span>
+                  </div>
+                  {marketStatus === 'loading' && <p className="market-strip-state">거래 데이터를 불러오는 중입니다.</p>}
+                  {marketStatus === 'error' && <p className="market-strip-state">거래 데이터를 확인하지 못했습니다.</p>}
+                  {marketStatus === 'ready' && marketSummary && (
+                    <>
+                      <div className="market-strip-metrics">
+                        <div><small>평균 매매가</small><b>{formatAmountManwon(marketSummary.averageTradeAmount)} <em className={marketSummary.tradeChangeRate >= 0 ? 'is-up' : 'is-down'}>{marketSummary.tradeChangeRate >= 0 ? '▲' : '▼'} {Math.abs(marketSummary.tradeChangeRate)}%</em></b><span>최근 그룹별 기준</span></div>
+                        <div><small>평균 전세가</small><b>{formatAmountManwon(marketSummary.averageJeonseDeposit)} <em className={marketSummary.jeonseChangeRate >= 0 ? 'is-up' : 'is-down'}>{marketSummary.jeonseChangeRate >= 0 ? '▲' : '▼'} {Math.abs(marketSummary.jeonseChangeRate)}%</em></b><span>평균 전세율 기준</span></div>
+                      </div>
+                      <div className="market-area-heading">
+                        <small>평형별 시세</small>
+                        <span>매매 평균(증감) / 평균 전세가</span>
+                      </div>
+                      <div className="market-strip-areas">
+                        {marketSummary.areaRows.map((row) => (
+                          <div key={row.label}>
+                            <small>{row.label}<span>{row.range}</span></small>
+                            <b>{formatAmountManwon(row.averageTradeAmount)} <em className={row.tradeChangeRate >= 0 ? 'is-up' : 'is-down'}>{row.tradeChangeRate >= 0 ? '▲' : '▼'} {Math.abs(row.tradeChangeRate)}%</em></b>
+                            <span>{formatAmountManwon(row.averageJeonseDeposit)}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="market-chart-heading">
+                        <small>매매/전세 시세 비교</small>
+                        <span><i /> 매매 <i /> 전세</span>
+                      </div>
+                      <div className="market-strip-chart" aria-label="최근 거래량 그래프">
+                        {marketSummary.trend.map((item) => {
+                          const max = Math.max(...marketSummary.trend.flatMap((trendItem) => [trendItem.tradeCount, trendItem.jeonseCount]), 1);
+                          const tradeHeight = 18 + Math.round((item.tradeCount / max) * 58);
+                          const jeonseHeight = 18 + Math.round((item.jeonseCount / max) * 58);
+                          return (
+                            <i key={item.label}>
+                              <b style={{ height: `${tradeHeight}px` }} />
+                              <b style={{ height: `${jeonseHeight}px` }} />
+                              <span>{item.label}</span>
+                            </i>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
+                </aside>
+              )}
 
               <aside className="condition-control-card">
                 <div className="condition-control-title"><div><small>{conditionStep === 'route' ? '선택한 경로' : '목적지 탐색'}</small><h2>{conditionStep === 'route' ? '조건 분석' : '어디로 갈까요?'}</h2></div><button onClick={() => setDestinationMenuOpen((open) => !open)} type="button">✨</button></div>
