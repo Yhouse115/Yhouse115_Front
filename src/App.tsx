@@ -29,6 +29,7 @@ function LandingPage() {
         <button aria-label="왜집 홈" className="landing-logo" type="button">
           <img alt="왜집?" src={waezipLogo} />
         </button>
+        <span className="eyebrow">우리 집을 이해하는 새로운 방식</span>
         <div className="landing-bar-end">
           <p>집을 보는 두 가지 시선</p>
           <LoginButton />
@@ -37,19 +38,14 @@ function LandingPage() {
       <main className="landing-shell">
         <section className="landing-choice" aria-label="WhyHouse entry routes">
           <div className="landing-intro">
-            <span className="eyebrow">우리 집을 이해하는 새로운 방식</span>
             <h1 className="hero-title">
               <span className="line">어떤 시선으로</span>
               <span className="line">집을 볼까요?</span>
             </h1>
-            <p>
-              복잡한 점수 대신, 지도와 기록으로 직접 판단할 수 있게 도와드려요.
-            </p>
           </div>
 
           <div className="choice-grid">
             <button className="choice-card choice-card--investment" onClick={() => navigateTo(routes.investment)} type="button">
-              <span className="choice-number">01</span>
               <span className="choice-art">
                 <img alt="지도와 집을 살펴보는 강아지 일러스트" className="choice-image" src={investmentImage} />
                 <span className="choice-chip">현장을 살펴봐요!</span>
@@ -68,7 +64,6 @@ function LandingPage() {
             </button>
 
             <button className="choice-card choice-card--family" onClick={() => navigateTo(routes.familyMap)} type="button">
-              <span className="choice-number">02</span>
               <span className="choice-art">
                 <img alt="집 주변 생활권을 안내하는 강아지 일러스트" className="choice-image" src={familyImage} />
                 <span className="choice-chip">같이 살펴봐요!</span>

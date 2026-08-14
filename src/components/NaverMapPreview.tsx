@@ -1,17 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { env } from '../config/env';
+import { useAuth } from '../features/auth/useAuth';
 import waezipHomeMarker from '../assets/waezip-home-marker.png';
 import waezipLogo from '../assets/waezip-logo.png';
 import {
-  getFeaturesInBounds,
   getNearbyFeatures,
+  getWalkingRoute,
   searchApartments,
   type ApartmentSummary,
   type FacilityCategory,
   type FeatureSummary,
   type MapFeature,
+  type WalkingRoute,
+  WalkingRouteNotFoundError,
 } from '../services/familyMap';
+import { logger } from '../services/logger';
+import { getUserMemo, saveUserMemo } from '../services/userMemo';
 
 type MapStatus = 'loading' | 'ready' | 'missing-key' | 'error';
 type FacilityKey = 'all' | 'kids' | 'school' | 'crosswalk' | 'signal' | 'cctv' | 'risk';
@@ -21,7 +26,7 @@ type ConditionCategory = 'school' | 'park' | 'childcare' | 'hospital';
 type ConditionDestination = {
   id: string;
   name: string;
-  category: 'school' | 'childcare';
+  category: ConditionCategory;
   latitude: number;
   longitude: number;
   address?: string | null;
@@ -31,6 +36,18 @@ type ConditionDestination = {
   signals: number;
   cctv: number;
 };
+type RouteSafetyMarker = {
+  id: string;
+  category: 'crosswalk' | 'signal';
+  name: string;
+  latitude: number;
+  longitude: number;
+};
+type WalkingRouteStatus = 'idle' | 'loading' | 'ready' | 'not-found' | 'error';
+
+function supportsStoredWalkingRoute(category: ConditionCategory) {
+  return category === 'school' || category === 'childcare' || category === 'park';
+}
 
 type MapOptions = {
   center?: unknown;
@@ -47,10 +64,6 @@ type MapInstance = {
   setCenter?: (center: unknown) => void;
   setZoom?: (zoom: number) => void;
   getZoom?: () => number;
-  getBounds?: () => {
-    getSW: () => { lat: () => number; lng: () => number };
-    getNE: () => { lat: () => number; lng: () => number };
-  };
 };
 
 type MarkerInstance = {
@@ -58,6 +71,10 @@ type MarkerInstance = {
   setIcon?: (icon: { content: string; anchor?: unknown }) => void;
   setPosition?: (position: unknown) => void;
   setZIndex?: (zIndex: number) => void;
+};
+
+type PolylineInstance = {
+  setMap: (map: MapInstance | null) => void;
 };
 
 type NaverMapsEvent = {
@@ -69,23 +86,25 @@ type NaverMapsEvent = {
   trigger?: (target: MapInstance, eventName: string) => void;
 };
 
-type BoundsLike = {
-  getSW: () => { lat: () => number; lng: () => number };
-  getNE: () => { lat: () => number; lng: () => number };
-};
-
 type DisplayMarker = {
   id: string;
-  category: FacilityCategory;
+  category: ActiveFacilityKey;
   name: string;
   latitude: number;
   longitude: number;
   count: number;
   features: MapFeature[];
 };
+type ActiveMapFeature = MapFeature & { category: ActiveFacilityKey };
 
-const facilityCategoryKeys: FacilityCategory[] = ['kids', 'school', 'crosswalk', 'signal', 'cctv', 'risk'];
+const facilityCategoryKeys: ActiveFacilityKey[] = ['kids', 'school', 'crosswalk', 'signal', 'cctv', 'risk'];
+const conditionFacilityCategoryKeys: FacilityCategory[] = ['school', 'kids', 'park', 'hospital', 'crosswalk', 'signal', 'cctv'];
 const defaultActiveFilters: ActiveFacilityKey[] = ['kids', 'school'];
+const nearbyRadiusM = 1000;
+const conditionParkRadiusM = 3000;
+// Used for pre-selection estimates. A selected stored route provides its own
+// tighter, precomputed safety-match threshold.
+const routeSafetyProximityMeters = 100;
 function getSavedConditionState() {
   try {
     const saved = window.sessionStorage.getItem('whyhouse:condition-map');
@@ -138,6 +157,13 @@ const facilityColors: Record<Exclude<FacilityKey, 'all'> | 'home', string> = {
   risk: '#FF5B66',
 };
 
+const conditionCategoryMeta: Record<ConditionCategory, { label: string; icon: string }> = {
+  school: { label: '학교', icon: '🏫' },
+  park: { label: '공원', icon: '🌳' },
+  childcare: { label: '유치원·어린이집', icon: '🧸' },
+  hospital: { label: '병원', icon: '🏥' },
+};
+
 const clusterMergeDistancePx = 49;
 
 declare global {
@@ -160,6 +186,13 @@ declare global {
           };
           zIndex?: number;
         }) => MarkerInstance;
+        Polyline: new (options: {
+          map?: MapInstance | null;
+          path: unknown[];
+          strokeColor?: string;
+          strokeWeight?: number;
+          strokeOpacity?: number;
+        }) => PolylineInstance;
         Event: NaverMapsEvent;
       };
     };
@@ -254,6 +287,18 @@ function getBubbleApartmentName(name: string) {
   return Array.from(name.replace(/\s+/g, '')).slice(0, 8).join('');
 }
 
+function getApartmentMarkerIcon(apartment: ApartmentSummary) {
+  return {
+    content: `
+      <button class="apartment-map-marker" type="button" aria-label="${escapeHtml(apartment.name)} 선택">
+        <span aria-hidden="true">🏢</span>
+        <b>${escapeHtml(getBubbleApartmentName(apartment.name))}</b>
+      </button>
+    `,
+    anchor: window.naver ? new window.naver.maps.Point(64, 22) : undefined,
+  };
+}
+
 function getFeatureLabel(category: FacilityCategory) {
   return facilityFilters.find((filter) => filter.key === category)?.label ?? category;
 }
@@ -273,6 +318,14 @@ function formatFeatureDetail(feature: MapFeature) {
 
 function getSummaryCount(summary: FeatureSummary[], category: FacilityCategory) {
   return summary.find((item) => item.category === category)?.count ?? 0;
+}
+
+function isActiveFacilityCategory(category: FacilityCategory): category is ActiveFacilityKey {
+  return facilityCategoryKeys.includes(category as ActiveFacilityKey);
+}
+
+function isActiveMapFeature(feature: MapFeature): feature is ActiveMapFeature {
+  return isActiveFacilityCategory(feature.category);
 }
 
 function getFeatureSummaryItems(summary: FeatureSummary[]) {
@@ -348,8 +401,10 @@ function mergeClusterMarkersByOverlap(markers: DisplayMarker[], zoom: number) {
 }
 
 function getDisplayMarkers(features: MapFeature[], zoom: number): DisplayMarker[] {
-  if (features.some((feature) => feature.source === 'cluster')) {
-    const markers = features.filter((feature) => zoom < 17 || feature.source !== 'cluster').map((feature) => {
+  const visibleFeatures = features.filter(isActiveMapFeature);
+
+  if (visibleFeatures.some((feature) => feature.source === 'cluster')) {
+    const markers = visibleFeatures.filter((feature) => zoom < 17 || feature.source !== 'cluster').map((feature) => {
       const count = typeof feature.metadata?.count === 'number' ? feature.metadata.count : 1;
       return {
         id: feature.id,
@@ -366,7 +421,7 @@ function getDisplayMarkers(features: MapFeature[], zoom: number): DisplayMarker[
 
   const gridMeters = getClusterGridMeters(zoom);
   if (gridMeters === 0) {
-    return features.map((feature) => ({
+    return visibleFeatures.map((feature) => ({
       id: feature.id,
       category: feature.category,
       name: feature.name,
@@ -377,8 +432,8 @@ function getDisplayMarkers(features: MapFeature[], zoom: number): DisplayMarker[
     }));
   }
 
-  const buckets = new Map<string, MapFeature[]>();
-  for (const feature of features) {
+  const buckets = new Map<string, ActiveMapFeature[]>();
+  for (const feature of visibleFeatures) {
     const latGrid = gridMeters / 111320;
     const lngGrid = gridMeters / (111320 * Math.cos((feature.latitude * Math.PI) / 180));
     const latKey = Math.round(feature.latitude / latGrid);
@@ -414,40 +469,87 @@ export function NaverMapPreview({
   const mapElementRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapInstance | null>(null);
   const apartmentMarkerRef = useRef<MarkerInstance | null>(null);
+  const apartmentSelectionZoomRef = useRef<number | null>(null);
+  const apartmentOptionMarkerRefs = useRef<MarkerInstance[]>([]);
   const facilityMarkerRefs = useRef<Array<{ marker: MarkerInstance; item: DisplayMarker }>>([]);
   const conditionMarkerRefs = useRef<MarkerInstance[]>([]);
+  const walkingRoutePolylineRef = useRef<PolylineInstance | null>(null);
+  const walkingRouteRequestIdRef = useRef(0);
   const savedDestinationIdRef = useRef(getSavedConditionState()?.destinationId);
-  const featureRequestIdRef = useRef(0);
-  const selectedApartmentRef = useRef<ApartmentSummary | null>(null);
-  const activeCategoriesRef = useRef<FacilityCategory[]>([]);
-  const boundsFetchTimerRef = useRef<number | null>(null);
-  const lastBoundsRequestKeyRef = useRef('');
   const defaultApartmentOptionsRef = useRef<ApartmentSummary[]>([]);
   const [status, setStatus] = useState<MapStatus>(() =>
     env.naverMapsClientId ? 'loading' : 'missing-key',
   );
   const [dataStatus, setDataStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [apartmentOptions, setApartmentOptions] = useState<ApartmentSummary[]>([]);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedApartment, setSelectedApartment] = useState<ApartmentSummary | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [topSearchOpen, setTopSearchOpen] = useState(false);
   const [activeFilters, setActiveFilters] = useState<ActiveFacilityKey[]>(defaultActiveFilters);
   const [animatedFilter, setAnimatedFilter] = useState<FacilityKey | null>(null);
   const [selectedFacility, setSelectedFacility] = useState<MapFeature | null>(null);
-  const [features, setFeatures] = useState<MapFeature[]>([]);
-  const [summary, setSummary] = useState<FeatureSummary[]>([]);
   const [compareSummary, setCompareSummary] = useState<FeatureSummary[]>([]);
   const [compareTarget, setCompareTarget] = useState<string>('');
-  const [currentZoom, setCurrentZoom] = useState(15);
+  const [currentZoom, setCurrentZoom] = useState(14);
   const [mapView, setMapView] = useState<MapView>('life');
   const [conditionStep, setConditionStep] = useState<'select' | 'route'>('select');
   const [selectedDestination, setSelectedDestination] = useState<ConditionDestination | null>(null);
+  const [selectedSchoolRoute, setSelectedSchoolRoute] = useState<WalkingRoute | null>(null);
+  const [walkingRouteStatus, setWalkingRouteStatus] = useState<WalkingRouteStatus>('idle');
   const [conditionFeatures, setConditionFeatures] = useState<MapFeature[]>([]);
-  const [visibleConditionCategories, setVisibleConditionCategories] = useState<ConditionCategory[]>(() => getSavedConditionState()?.visibleCategories ?? ['school', 'childcare']);
+  const [visibleConditionCategories, setVisibleConditionCategories] = useState<ConditionCategory[]>(() => getSavedConditionState()?.visibleCategories ?? ['school', 'childcare', 'park', 'hospital']);
   const [destinationMenuOpen, setDestinationMenuOpen] = useState(false);
+  const [memoContent, setMemoContent] = useState('');
+  const [memoStatus, setMemoStatus] = useState<'idle' | 'loading' | 'saving' | 'saved' | 'error'>('idle');
+
+  const { session } = useAuth();
+  const userId = session?.user?.id;
+
+  useEffect(() => {
+    if (!userId) {
+      return;
+    }
+
+    let cancelled = false;
+    setMemoStatus('loading');
+    getUserMemo(userId)
+      .then((content) => {
+        if (!cancelled) {
+          setMemoContent(content);
+          setMemoStatus('idle');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMemoStatus('error');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  function handleSaveMemo() {
+    if (!userId) {
+      return;
+    }
+    setMemoStatus('saving');
+    saveUserMemo(userId, memoContent)
+      .then(() => setMemoStatus('saved'))
+      .catch(() => setMemoStatus('error'));
+  }
 
   const activeCategories = useMemo(() => getActiveCategories(activeFilters), [activeFilters]);
+  const features = useMemo(
+    () => conditionFeatures.filter((feature) => activeCategories.includes(feature.category)),
+    [activeCategories, conditionFeatures],
+  );
+  const summary = useMemo(
+    () => compareSummary.filter((item) => activeCategories.includes(item.category)),
+    [activeCategories, compareSummary],
+  );
   const topApartmentSuggestions = useMemo(
     () => filterApartmentSuggestions(apartmentOptions, searchTerm, 12),
     [apartmentOptions, searchTerm],
@@ -463,9 +565,18 @@ export function NaverMapPreview({
   const displayMarkers = useMemo(() => getDisplayMarkers(features, currentZoom), [features, currentZoom]);
   const conditionCandidates = useMemo(() => {
     if (!selectedApartment) return [];
-    const candidates = conditionFeatures.filter((feature) => feature.category === 'school' || (feature.category === 'kids' && feature.source === 'childcare_centers'));
-    return candidates.map((feature) => {
-      const category = feature.category === 'school' ? 'school' as const : 'childcare' as const;
+    const candidates = conditionFeatures.filter((feature) =>
+      feature.category === 'school'
+      || feature.category === 'park'
+      || feature.category === 'hospital'
+      || (feature.category === 'kids' && feature.source === 'education_care'),
+    );
+    const destinations = candidates.map((feature) => {
+      const category: ConditionCategory =
+        feature.category === 'school' ? 'school'
+          : feature.category === 'park' ? 'park'
+            : feature.category === 'hospital' ? 'hospital'
+              : 'childcare';
       const directDistance = distanceMeters(selectedApartment.latitude, selectedApartment.longitude, feature.latitude, feature.longitude);
       const route = [
         { latitude: selectedApartment.latitude, longitude: selectedApartment.longitude },
@@ -473,16 +584,108 @@ export function NaverMapPreview({
         { latitude: feature.latitude, longitude: feature.longitude },
       ];
       const routeDistance = distanceMeters(route[0].latitude, route[0].longitude, route[1].latitude, route[1].longitude) + distanceMeters(route[1].latitude, route[1].longitude, route[2].latitude, route[2].longitude);
-      const routeSignals = conditionFeatures.filter((item) => item.category === 'signal' && distanceToRoute(item, route) <= 45);
-      const routeCrosswalks = conditionFeatures.filter((item) => item.category === 'crosswalk' && distanceToRoute(item, route) <= 45 && !routeSignals.some((signal) => distanceMeters(item.latitude, item.longitude, signal.latitude, signal.longitude) <= 25));
-      const routeCctv = conditionFeatures.filter((item) => item.category === 'cctv' && distanceToRoute(item, route) <= 45);
-      return { id: feature.id, name: feature.name, category, latitude: feature.latitude, longitude: feature.longitude, address: feature.address, distance: Math.round(Math.max(directDistance, routeDistance)), minutes: Math.max(1, Math.ceil(Math.max(directDistance, routeDistance) / 75)), signals: routeSignals.length, crosswalks: routeCrosswalks.length, cctv: routeCctv.length };
-    }).sort((a, b) => a.distance - b.distance).slice(0, 12);
-  }, [conditionFeatures, selectedApartment]);
+      const routeSignals = conditionFeatures.filter((item) => item.category === 'signal' && distanceToRoute(item, route) <= routeSafetyProximityMeters);
+      const routeCrosswalks = conditionFeatures.filter((item) => item.category === 'crosswalk' && distanceToRoute(item, route) <= routeSafetyProximityMeters && !routeSignals.some((signal) => distanceMeters(item.latitude, item.longitude, signal.latitude, signal.longitude) <= 25));
+      const routeCctv = conditionFeatures.filter((item) => item.category === 'cctv' && distanceToRoute(item, route) <= routeSafetyProximityMeters);
+      const estimatedDistance = Math.round(Math.max(directDistance, routeDistance));
+      const storedWalkingDistance = feature.walking_distance_m;
+      const storedWalkingTime = feature.walking_time_min;
+      return {
+        id: feature.id,
+        name: feature.name,
+        category,
+        latitude: feature.latitude,
+        longitude: feature.longitude,
+        address: feature.address,
+        distance: typeof storedWalkingDistance === 'number' && Number.isFinite(storedWalkingDistance) ? Math.round(storedWalkingDistance) : estimatedDistance,
+        minutes: typeof storedWalkingTime === 'number' && Number.isFinite(storedWalkingTime)
+          ? Math.max(1, Math.ceil(storedWalkingTime))
+          : Math.max(1, Math.ceil(estimatedDistance / 75)),
+        signals: routeSignals.length,
+        crosswalks: routeCrosswalks.length,
+        cctv: routeCctv.length,
+      };
+    });
 
-  useEffect(() => {
-    selectedApartmentRef.current = selectedApartment;
-  }, [selectedApartment]);
+    // Medical facilities can be densely clustered. Keep the nearest choices
+    // per condition type so parks and schools are not pushed out by hospitals.
+    return (Object.keys(conditionCategoryMeta) as ConditionCategory[])
+      .flatMap((category) => destinations
+        .filter((destination) => destination.category === category)
+        .sort((a, b) => a.distance - b.distance)
+        .slice(0, 6))
+      .sort((a, b) => a.distance - b.distance);
+  }, [conditionFeatures, selectedApartment]);
+  const selectedWalkingRoute = useMemo(
+    () => selectedDestination && supportsStoredWalkingRoute(selectedDestination.category) ? selectedSchoolRoute : null,
+    [selectedDestination, selectedSchoolRoute],
+  );
+  const selectedRouteSafetyFeatures = useMemo<RouteSafetyMarker[]>(() => {
+    if (!selectedWalkingRoute || selectedWalkingRoute.routeCoordinates.length < 2) {
+      return [];
+    }
+
+    if (Array.isArray(selectedWalkingRoute.crossingEvents)) {
+      return selectedWalkingRoute.crossingEvents.flatMap((event) => [
+        {
+          id: `crosswalk:${event.crosswalkEventId}`,
+          category: 'crosswalk' as const,
+          name: '실제 통과 횡단보도',
+          latitude: event.latitude,
+          longitude: event.longitude,
+        },
+        ...event.pedestrianSignals.map((signal) => ({
+          id: `signal:${signal.id}`,
+          category: 'signal' as const,
+          name: '실제 통과 횡단보도 보행신호',
+          latitude: signal.latitude,
+          longitude: signal.longitude,
+        })),
+      ]);
+    }
+
+    const route = selectedWalkingRoute.routeCoordinates.map(([longitude, latitude]) => ({ latitude, longitude }));
+    const safetyThresholdMeters = selectedWalkingRoute.safetyMatchThresholdMeters ?? routeSafetyProximityMeters;
+    return conditionFeatures
+      .filter((feature): feature is MapFeature & { category: 'crosswalk' | 'signal' } => (
+        (feature.category === 'crosswalk' || feature.category === 'signal')
+        && distanceToRoute(feature, route) <= safetyThresholdMeters
+      ))
+      .map((feature) => ({
+        id: feature.id,
+        category: feature.category,
+        name: feature.name,
+        latitude: feature.latitude,
+        longitude: feature.longitude,
+      }));
+  }, [conditionFeatures, selectedWalkingRoute]);
+  const selectedDestinationCrosswalks = selectedWalkingRoute
+    ? selectedWalkingRoute.crosswalkCount ?? selectedRouteSafetyFeatures.filter((feature) => feature.category === 'crosswalk').length
+    : selectedDestination?.crosswalks;
+  const selectedDestinationSignals = selectedWalkingRoute
+    ? selectedWalkingRoute.pedestrianSignalCount ?? selectedRouteSafetyFeatures.filter((feature) => feature.category === 'signal').length
+    : selectedDestination?.signals;
+  const selectedDestinationCctv = selectedWalkingRoute
+    ? selectedWalkingRoute.cctvLocationCount ?? selectedDestination?.cctv
+    : selectedDestination?.cctv;
+  const selectedRouteSafetyMessage = selectedWalkingRoute
+    && walkingRouteStatus === 'ready'
+    && selectedRouteSafetyFeatures.length === 0
+    ? '이 경로에는 표시할 횡단보도·보행신호 데이터가 없습니다.'
+    : null;
+  const selectedDestinationDistance = selectedWalkingRoute
+    ? Math.round(selectedWalkingRoute.walkDistanceMeters)
+    : selectedDestination?.distance;
+  const selectedDestinationMinutes = selectedWalkingRoute
+    ? Math.max(1, Math.ceil(selectedWalkingRoute.walkTimeMinutes))
+    : selectedDestination?.minutes;
+  const walkingRouteMessage = walkingRouteStatus === 'loading'
+    ? '보행 경로를 불러오는 중입니다.'
+    : walkingRouteStatus === 'not-found'
+      ? '이 시설의 저장된 보행 경로가 없습니다.'
+      : walkingRouteStatus === 'error'
+        ? '보행 경로를 불러오지 못했습니다. 다시 선택해 주세요.'
+        : null;
 
   useEffect(() => {
     window.sessionStorage.setItem('whyhouse:condition-map', JSON.stringify({
@@ -492,10 +695,6 @@ export function NaverMapPreview({
       lastUpdatedAt: Date.now(),
     }));
   }, [conditionStep, selectedDestination, visibleConditionCategories]);
-
-  useEffect(() => {
-    activeCategoriesRef.current = activeCategories;
-  }, [activeCategories]);
 
   useEffect(() => {
     if (!env.naverMapsClientId) {
@@ -513,7 +712,7 @@ export function NaverMapPreview({
         const center = new window.naver.maps.LatLng(37.5245, 126.866);
         const map = new window.naver.maps.Map(mapElementRef.current, {
           center,
-          zoom: 15,
+          zoom: 14,
           zoomControl: false,
           scaleControl: true,
           scaleControlOptions: {
@@ -523,21 +722,10 @@ export function NaverMapPreview({
         });
 
         mapRef.current = map;
-        setCurrentZoom(map.getZoom?.() ?? 15);
+        setCurrentZoom(map.getZoom?.() ?? 14);
         window.naver.maps.Event.addListener(map, 'idle', () => {
           const zoom = map.getZoom?.() ?? 17;
           setCurrentZoom(zoom);
-          if (!selectedApartmentRef.current) {
-            return;
-          }
-
-          if (boundsFetchTimerRef.current) {
-            window.clearTimeout(boundsFetchTimerRef.current);
-          }
-
-          boundsFetchTimerRef.current = window.setTimeout(() => {
-            void refreshFeaturesByBounds(activeCategoriesRef.current);
-          }, 420);
         });
         window.naver.maps.Event.addListener(map, 'click', () => {
           setSelectedFacility(null);
@@ -552,16 +740,13 @@ export function NaverMapPreview({
 
     return () => {
       cancelled = true;
-      if (boundsFetchTimerRef.current) {
-        window.clearTimeout(boundsFetchTimerRef.current);
-      }
     };
   }, []);
 
   useEffect(() => {
     let cancelled = false;
     setDataStatus('loading');
-    searchApartments('', 10)
+    searchApartments('', 1000)
       .then((items) => {
         if (cancelled) {
           return;
@@ -612,6 +797,33 @@ export function NaverMapPreview({
 
   useEffect(() => {
     const map = mapRef.current;
+    apartmentOptionMarkerRefs.current.forEach((marker) => marker.setMap(null));
+    apartmentOptionMarkerRefs.current = [];
+
+    if (!map || !window.naver?.maps || selectedApartment) {
+      return;
+    }
+
+    apartmentOptionMarkerRefs.current = apartmentOptions.map((apartment) => {
+      const marker = new window.naver!.maps.Marker({
+        position: new window.naver!.maps.LatLng(apartment.latitude, apartment.longitude),
+        map,
+        title: apartment.name,
+        icon: getApartmentMarkerIcon(apartment),
+        zIndex: 80,
+      });
+      window.naver!.maps.Event.addListener(marker, 'click', () => selectApartment(apartment));
+      return marker;
+    });
+
+    return () => {
+      apartmentOptionMarkerRefs.current.forEach((marker) => marker.setMap(null));
+      apartmentOptionMarkerRefs.current = [];
+    };
+  }, [apartmentOptions, selectedApartment, status]);
+
+  useEffect(() => {
+    const map = mapRef.current;
     if (!map || !window.naver?.maps) {
       return;
     }
@@ -638,21 +850,30 @@ export function NaverMapPreview({
   useEffect(() => {
     if (!selectedApartment) {
       setCompareSummary([]);
+      setConditionFeatures([]);
+      setDataStatus('idle');
       return;
     }
 
     let cancelled = false;
-    getNearbyFeatures(selectedApartment.id, facilityCategoryKeys, 1000)
-      .then((result) => {
+    setDataStatus('loading');
+    Promise.all([
+      getNearbyFeatures(selectedApartment.id, conditionFacilityCategoryKeys, nearbyRadiusM),
+      getNearbyFeatures(selectedApartment.id, ['park'], conditionParkRadiusM),
+    ])
+      .then(([nearbyResult, parkResult]) => {
         if (!cancelled) {
-          setCompareSummary(result.summary);
-          setConditionFeatures(result.features);
+          const nonParkFeatures = nearbyResult.features.filter((feature) => feature.category !== 'park');
+          setCompareSummary(nearbyResult.summary);
+          setConditionFeatures([...nonParkFeatures, ...parkResult.features.filter((feature) => feature.category === 'park')]);
+          setDataStatus('idle');
         }
       })
       .catch(() => {
         if (!cancelled) {
           setCompareSummary([]);
           setConditionFeatures([]);
+          setDataStatus('error');
         }
       });
 
@@ -670,6 +891,75 @@ export function NaverMapPreview({
     }
     savedDestinationIdRef.current = undefined;
   }, [conditionCandidates, selectedDestination]);
+
+  useEffect(() => {
+    const requestId = walkingRouteRequestIdRef.current + 1;
+    walkingRouteRequestIdRef.current = requestId;
+
+    if (!selectedApartment || !selectedDestination || !supportsStoredWalkingRoute(selectedDestination.category)) {
+      setSelectedSchoolRoute(null);
+      setWalkingRouteStatus('idle');
+      return;
+    }
+
+    let cancelled = false;
+    setSelectedSchoolRoute(null);
+    setWalkingRouteStatus('loading');
+    getWalkingRoute(selectedApartment.id, selectedDestination.id)
+      .then((route) => {
+        if (!cancelled && walkingRouteRequestIdRef.current === requestId) {
+          setSelectedSchoolRoute(route);
+          setWalkingRouteStatus('ready');
+        }
+      })
+      .catch((error: unknown) => {
+        if (cancelled || walkingRouteRequestIdRef.current !== requestId) {
+          return;
+        }
+
+        setSelectedSchoolRoute(null);
+        if (error instanceof WalkingRouteNotFoundError) {
+          setWalkingRouteStatus('not-found');
+          return;
+        }
+
+        logger.warn('walking_route_request_failed', {
+          complexId: selectedApartment.id,
+          featureId: selectedDestination.id,
+        });
+        setWalkingRouteStatus('error');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedApartment?.id, selectedDestination?.category, selectedDestination?.id]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    walkingRoutePolylineRef.current?.setMap(null);
+    walkingRoutePolylineRef.current = null;
+
+    if (!map || !window.naver?.maps || !selectedWalkingRoute) {
+      return;
+    }
+
+    const path = selectedWalkingRoute.routeCoordinates.map(([longitude, latitude]) =>
+      new window.naver!.maps.LatLng(latitude, longitude),
+    );
+    walkingRoutePolylineRef.current = new window.naver.maps.Polyline({
+      map,
+      path,
+      strokeColor: '#2f6fe4',
+      strokeWeight: 5,
+      strokeOpacity: 0.85,
+    });
+
+    return () => {
+      walkingRoutePolylineRef.current?.setMap(null);
+      walkingRoutePolylineRef.current = null;
+    };
+  }, [selectedWalkingRoute, status]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -730,120 +1020,131 @@ export function NaverMapPreview({
     conditionMarkerRefs.current = [];
     if (mapView !== 'condition' || !map || !window.naver?.maps || !selectedApartment) return;
 
-    const visibleCandidates = conditionCandidates.filter((item) => visibleConditionCategories.includes(item.category));
+    const visibleCandidates = selectedDestination
+      ? conditionCandidates.filter((item) => item.id === selectedDestination.id)
+      : conditionCandidates.filter((item) => visibleConditionCategories.includes(item.category));
     conditionMarkerRefs.current = visibleCandidates.map((destination) => {
         const isSelected = destination.id === selectedDestination?.id;
+        const destinationRoute = isSelected ? selectedWalkingRoute : null;
+        const destinationDistance = destinationRoute
+          ? Math.round(destinationRoute.walkDistanceMeters)
+          : destination.distance;
+        const destinationMinutes = destinationRoute
+          ? Math.max(1, Math.ceil(destinationRoute.walkTimeMinutes))
+          : destination.minutes;
         const marker = new window.naver!.maps.Marker({
           position: new window.naver!.maps.LatLng(destination.latitude, destination.longitude),
           map,
           title: destination.name,
           zIndex: isSelected ? 100 : 90,
           icon: {
-            content: `<button class="condition-map-label${isSelected ? ' condition-map-label--selected' : ''}" type="button"><span>🏫</span><b>${escapeHtml(destination.name)}</b><small>도보 ${destination.minutes}분 · ${destination.distance}m</small></button>`,
+            content: `<button class="condition-map-label${isSelected ? ' condition-map-label--selected' : ''}" type="button"><span>${conditionCategoryMeta[destination.category].icon}</span><b>${escapeHtml(destination.name)}</b><small>도보 ${destinationMinutes}분 · ${destinationDistance}m</small></button>`,
             anchor: new window.naver!.maps.Point(82, 28),
           },
         });
-        window.naver!.maps.Event.addListener(marker, 'click', () => selectDestination(destination));
+        window.naver!.maps.Event.addListener(marker, 'click', () => {
+          if (isSelected) {
+            resetDestination();
+            return;
+          }
+          selectDestination(destination);
+        });
         return marker;
       });
     return () => {
       conditionMarkerRefs.current.forEach((marker) => marker.setMap(null));
       conditionMarkerRefs.current = [];
     };
-  }, [conditionCandidates, conditionStep, mapView, selectedApartment, selectedDestination, visibleConditionCategories]);
+  }, [conditionCandidates, conditionStep, mapView, selectedApartment, selectedDestination, selectedWalkingRoute, visibleConditionCategories]);
 
   useEffect(() => {
-    if (!selectedApartment) {
+    const map = mapRef.current;
+    if (!map || !window.naver?.maps || mapView !== 'condition' || !selectedWalkingRoute) {
       return;
     }
 
-    void refreshFeaturesByBounds(activeCategories);
-  }, [selectedApartment?.id, activeCategories]);
+    const markers = selectedRouteSafetyFeatures.map((feature) => new window.naver!.maps.Marker({
+      position: new window.naver!.maps.LatLng(feature.latitude, feature.longitude),
+      map,
+      title: `${feature.category === 'crosswalk' ? '횡단보도' : '보행신호'}: ${feature.name}`,
+      icon: getMarkerIcon(
+        feature.category === 'crosswalk' ? '🚸' : '🚦',
+        facilityColors[feature.category],
+        'facility',
+      ),
+      zIndex: 105,
+    }));
 
-  async function refreshFeaturesByBounds(categories: FacilityCategory[]) {
-    if (categories.length === 0) {
-      featureRequestIdRef.current += 1;
-      setFeatures([]);
-      setSummary([]);
-      setSelectedFacility(null);
-      setDataStatus('idle');
-      return;
-    }
-
-    const bounds = mapRef.current?.getBounds?.() as BoundsLike | undefined;
-    if (!bounds) {
-      return;
-    }
-
-    const sw = bounds.getSW();
-    const ne = bounds.getNE();
-    const boundsKey = [
-      sw.lat().toFixed(4),
-      sw.lng().toFixed(4),
-      ne.lat().toFixed(4),
-      ne.lng().toFixed(4),
-      categories.join(','),
-    ].join(':');
-    if (lastBoundsRequestKeyRef.current === boundsKey) {
-      return;
-    }
-    lastBoundsRequestKeyRef.current = boundsKey;
-
-    const requestId = featureRequestIdRef.current + 1;
-    featureRequestIdRef.current = requestId;
-    setDataStatus('loading');
-
-    try {
-      const result = await getFeaturesInBounds(
-        {
-          swLat: sw.lat(),
-          swLng: sw.lng(),
-          neLat: ne.lat(),
-          neLng: ne.lng(),
-        },
-        categories,
-        mapRef.current?.getZoom?.() ?? currentZoom,
-      );
-      if (featureRequestIdRef.current !== requestId) {
-        return;
-      }
-      setFeatures(result.features);
-      setSummary(result.summary);
-      setDataStatus('idle');
-    } catch {
-      if (featureRequestIdRef.current === requestId) {
-        setDataStatus('error');
-      }
-    }
-  }
+    return () => {
+      markers.forEach((marker) => marker.setMap(null));
+    };
+  }, [mapView, selectedRouteSafetyFeatures, selectedWalkingRoute]);
 
   function selectApartment(apartment: ApartmentSummary) {
+    if (selectedApartment?.id === apartment.id) {
+      deselectApartment();
+      return;
+    }
+
+    walkingRouteRequestIdRef.current += 1;
+    const isChangingSelection = selectedApartment !== null;
     setSelectedApartment(apartment);
     setSidebarOpen(false);
     setSelectedFacility(null);
     setSelectedDestination(null);
+    setSelectedSchoolRoute(null);
+    setWalkingRouteStatus('idle');
     setConditionStep('select');
 
     const map = mapRef.current;
     if (window.naver?.maps && map) {
       const center = new window.naver.maps.LatLng(apartment.latitude, apartment.longitude);
       map.setCenter?.(center);
-      map.setZoom?.(17);
+      if (!isChangingSelection) {
+        const previousZoom = map.getZoom?.() ?? 14;
+        apartmentSelectionZoomRef.current = previousZoom;
+        map.setZoom?.(previousZoom + 1);
+      }
       window.naver.maps.Event.trigger?.(map, 'resize');
 
       if (!apartmentMarkerRef.current) {
-        apartmentMarkerRef.current = new window.naver.maps.Marker({
+        const selectedMarker = new window.naver.maps.Marker({
           position: center,
           map,
           title: apartment.name,
           icon: getMarkerIcon('집', facilityColors.home, 'home', waezipHomeMarker),
           zIndex: 10000,
         });
+        window.naver.maps.Event.addListener(selectedMarker, 'click', (event) => {
+          event?.stop?.();
+          deselectApartment();
+        });
+        apartmentMarkerRef.current = selectedMarker;
       } else {
         apartmentMarkerRef.current.setPosition?.(center);
         apartmentMarkerRef.current.setMap(map);
         apartmentMarkerRef.current.setZIndex?.(10000);
       }
+    }
+  }
+
+  function deselectApartment() {
+    walkingRouteRequestIdRef.current += 1;
+    setSelectedApartment(null);
+    setSelectedFacility(null);
+    setSelectedDestination(null);
+    setSelectedSchoolRoute(null);
+    setWalkingRouteStatus('idle');
+    setConditionStep('select');
+    setCompareSummary([]);
+    setConditionFeatures([]);
+    apartmentMarkerRef.current?.setMap(null);
+
+    const map = mapRef.current;
+    if (map && apartmentSelectionZoomRef.current !== null) {
+      map.setZoom?.(apartmentSelectionZoomRef.current);
+      apartmentSelectionZoomRef.current = null;
+      window.naver?.maps.Event.trigger?.(map, 'resize');
     }
   }
 
@@ -905,13 +1206,18 @@ export function NaverMapPreview({
 
   function selectDestination(destination: ConditionDestination) {
     setSelectedDestination(destination);
+    setSelectedSchoolRoute(null);
+    setWalkingRouteStatus(supportsStoredWalkingRoute(destination.category) ? 'loading' : 'idle');
     setConditionStep('route');
     setDestinationMenuOpen(false);
     setSelectedFacility(null);
   }
 
   function resetDestination() {
+    walkingRouteRequestIdRef.current += 1;
     setSelectedDestination(null);
+    setSelectedSchoolRoute(null);
+    setWalkingRouteStatus('idle');
     setConditionStep('select');
   }
 
@@ -930,7 +1236,7 @@ export function NaverMapPreview({
         <button aria-label="처음 화면으로 돌아가기" className="family-map-back" onClick={onBackHome} type="button">‹</button>
         <nav className="map-view-tabs" aria-label="지도 종류">
           <button className={mapView === 'life' ? 'is-active' : ''} onClick={() => setMapView('life')} type="button">생활환경 지도</button>
-          <button className={mapView === 'condition' ? 'is-active' : ''} onClick={() => { setMapView('condition'); setSidebarOpen(false); setVisibleConditionCategories((current) => Array.from(new Set([...current, 'school', 'childcare']))); }} type="button">조건 지도</button>
+          <button className={mapView === 'condition' ? 'is-active' : ''} onClick={() => { setMapView('condition'); setSidebarOpen(false); setVisibleConditionCategories((current) => Array.from(new Set([...current, 'school', 'childcare', 'park', 'hospital']))); }} type="button">조건 지도</button>
         </nav>
         <div className={topSearchOpen ? 'top-search top-search--expanded' : 'top-search'}>
           <button
@@ -1056,8 +1362,29 @@ export function NaverMapPreview({
 
           <section className="sidebar-memo">
             <h3>비교 분석 메모</h3>
-            <textarea placeholder="비교하며 발견한 점을 기록하세요." />
-            <button type="button">메모 저장</button>
+            {userId ? (
+              <>
+                <textarea
+                  disabled={memoStatus === 'loading'}
+                  onChange={(event) => {
+                    setMemoContent(event.target.value);
+                    setMemoStatus('idle');
+                  }}
+                  placeholder="비교하며 발견한 점을 기록하세요."
+                  value={memoContent}
+                />
+                <button disabled={memoStatus === 'loading' || memoStatus === 'saving'} onClick={handleSaveMemo} type="button">
+                  {memoStatus === 'saving' ? '저장 중...' : '메모 저장'}
+                </button>
+                {memoStatus === 'saved' && <small className="memo-status">저장됐어요.</small>}
+                {memoStatus === 'error' && <small className="memo-status memo-status--error">메모를 불러오지 못했어요. 다시 시도해주세요.</small>}
+              </>
+            ) : (
+              <>
+                <textarea disabled placeholder="로그인하면 메모를 남길 수 있어요." />
+                <button disabled type="button">메모 저장</button>
+              </>
+            )}
           </section>
 
           <button className="go-note" onClick={onOpenInvestment} type="button">
@@ -1123,24 +1450,24 @@ export function NaverMapPreview({
             <>
               <section className="condition-summary" aria-label="조건 지도 요약">
                 <div><small>선택 단지</small><b>{selectedApartment.name}</b><span>→</span><strong>{conditionStep === 'route' ? '보행 조건' : '목적지 선택'}</strong></div>
-                <p>{selectedDestination ? `${selectedDestination.name}까지 도보 ${selectedDestination.minutes}분 · ${selectedDestination.distance}m` : '학교·유치원·어린이집 등 목적지를 선택하세요.'}</p>
+                <p>{selectedDestination ? `${selectedDestination.name}까지 도보 ${selectedDestinationMinutes}분 · ${selectedDestinationDistance}m` : '학교·공원·유치원·어린이집·병원 중 목적지를 선택하세요.'}</p>
                 {selectedDestination && <button onClick={resetDestination} type="button">목적지 초기화</button>}
               </section>
 
               <aside className="condition-apartment-card">
                 <small>선택 단지</small><h2>{selectedApartment.name}</h2><p>{selectedApartment.address}</p>
                 <dl>
-                  {selectedDestination ? <><div><dt>통학 목적지</dt><dd>{selectedDestination.name}</dd></div><div><dt>도보 시간</dt><dd>{selectedDestination.minutes}분</dd></div><div><dt>횡단보도</dt><dd>{selectedDestination.crosswalks}개</dd></div><div><dt>보행신호</dt><dd>{selectedDestination.signals}개</dd></div><div><dt>CCTV</dt><dd>{selectedDestination.cctv}개</dd></div></> : <><div><dt>현재 상태</dt><dd>목적지 선택 전</dd></div><div><dt>분석 기준</dt><dd>실제 시설 좌표·큰길 경로</dd></div></>}
+                  {selectedDestination ? <><div><dt>통학 목적지</dt><dd>{selectedDestination.name}</dd></div><div><dt>도보 시간</dt><dd>{selectedDestinationMinutes}분</dd></div><div><dt>횡단보도</dt><dd>{selectedDestinationCrosswalks}개</dd></div><div><dt>보행신호</dt><dd>{selectedDestinationSignals}개</dd></div><div><dt>CCTV</dt><dd>{selectedDestinationCctv}개</dd></div></> : <><div><dt>현재 상태</dt><dd>목적지 선택 전</dd></div><div><dt>분석 기준</dt><dd>실제 시설 좌표·큰길 경로</dd></div></>}
                 </dl>
                 <button onClick={onOpenInvestment} type="button">단지 상세 보기</button>
               </aside>
 
               <aside className="condition-control-card">
                 <div className="condition-control-title"><div><small>{conditionStep === 'route' ? '선택한 경로' : '목적지 탐색'}</small><h2>{conditionStep === 'route' ? '조건 분석' : '어디로 갈까요?'}</h2></div><button onClick={() => setDestinationMenuOpen((open) => !open)} type="button">✨</button></div>
-                {conditionStep === 'route' && selectedDestination ? <div className="condition-metrics"><div><span>🚶</span><small>도보 시간</small><b>{selectedDestination.minutes}분</b></div><div><span>🚸</span><small>횡단보도</small><b>{selectedDestination.crosswalks}개</b></div><div><span>🚦</span><small>보행신호</small><b>{selectedDestination.signals}개</b></div><div><span>📹</span><small>CCTV</small><b>{selectedDestination.cctv}개</b></div><button onClick={resetDestination} type="button">다른 목적지 선택</button></div> : <div className="condition-categories">{([['school','학교','🏫'],['park','공원','🌳'],['childcare','유치원·어린이집','🧸'],['hospital','병원','🏥']] as const).map(([key,label,icon]) => <button className={visibleConditionCategories.includes(key) ? 'is-active' : ''} key={key} onClick={() => toggleConditionCategory(key)} type="button"><span>{icon}</span>{label}<small>{visibleConditionCategories.includes(key) ? '표시 중' : '선택'}</small></button>)}</div>}
-                {destinationMenuOpen && <div className="destination-menu">{conditionCandidates.map((item) => <button key={item.id} onClick={() => selectDestination(item)} type="button"><span>🏫 {item.name}</span><small>도보 {item.minutes}분 · {item.distance}m</small></button>)}</div>}
+                {conditionStep === 'route' && selectedDestination ? <div className="condition-metrics"><div><span>🚶</span><small>도보 시간</small><b>{selectedDestinationMinutes}분</b></div><div><span>🚸</span><small>횡단보도</small><b>{selectedDestinationCrosswalks}개</b></div><div><span>🚦</span><small>보행신호</small><b>{selectedDestinationSignals}개</b></div><div><span>📹</span><small>CCTV</small><b>{selectedDestinationCctv}개</b></div>{supportsStoredWalkingRoute(selectedDestination.category) && walkingRouteMessage && <p className="condition-route-status" role="status">{walkingRouteMessage}</p>}{selectedRouteSafetyMessage && <p className="condition-route-status" role="status">{selectedRouteSafetyMessage}</p>}<button onClick={resetDestination} type="button">다른 목적지 선택</button></div> : <div className="condition-categories">{(Object.entries(conditionCategoryMeta) as Array<[ConditionCategory, { label: string; icon: string }]>).map(([key, meta]) => <button className={visibleConditionCategories.includes(key) ? 'is-active' : ''} key={key} onClick={() => toggleConditionCategory(key)} type="button"><span>{meta.icon}</span>{meta.label}<small>{visibleConditionCategories.includes(key) ? '표시 중' : '선택'}</small></button>)}</div>}
+                {destinationMenuOpen && <div className="destination-menu">{conditionCandidates.map((item) => <button key={item.id} onClick={() => selectDestination(item)} type="button"><span>{conditionCategoryMeta[item.category].icon} {item.name}</span><small>도보 {item.minutes}분 · {item.distance}m</small></button>)}</div>}
               </aside>
-              {conditionStep === 'select' && conditionCandidates.length === 0 && <div className="condition-empty">주변 학교·어린이집 정보를 불러오는 중입니다.</div>}
+              {conditionStep === 'select' && conditionCandidates.length === 0 && <div className="condition-empty">주변 학교·공원·어린이집·병원 정보를 불러오는 중입니다.</div>}
             </>
           )}
 
@@ -1169,19 +1496,10 @@ export function NaverMapPreview({
             )}
           </div>
 
-          {status === 'ready' && !selectedApartment && (
-            <div className="apartment-bubble-layer" aria-label="지도에서 아파트 선택">
-              {sidebarApartmentOptions.map((apartment) => (
-                <button
-                  className="apartment-map-bubble"
-                  key={apartment.id}
-                  onClick={() => selectApartment(apartment)}
-                  title={apartment.name}
-                  type="button"
-                >
-                  {getBubbleApartmentName(apartment.name)}
-                </button>
-              ))}
+          {status === 'ready' && !selectedApartment && apartmentOptions.length > 0 && (
+            <div className="apartment-map-guide" role="status">
+              <span aria-hidden="true">🏢</span>
+              <div><b>지도에서 아파트를 선택하세요</b><small>단지 이름을 누르면 주변 생활환경을 바로 보여드려요.</small></div>
             </div>
           )}
 
