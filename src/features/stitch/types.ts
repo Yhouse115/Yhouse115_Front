@@ -16,6 +16,66 @@ export interface StitchBuildingPanelProps {
   useMockFallback?: boolean;
 }
 
+// ─── 건축물 단위 타입 (BE /buildings/{pnu}/summary 응답 매핑) ───
+
+export interface BuildingInfoSummary {
+  pnu: string;
+  buildingName: string | null;
+  buildingType: string | null;       // 'APT' | 'TOWNHOUSE' | 'OFFICETEL'
+  adminDongCode: string | null;
+  adminDongName: string | null;
+  legalDongCode: string | null;
+  legalDongName: string | null;
+  jibunAddress: string | null;
+  jibun: string | null;
+  totalHouseholds: number | null;
+  totalParking: number | null;
+  parkingPerHousehold: number | null;
+  useApprovalDate: string | null;    // 'YYYY-MM-DD'
+  buildYear: number | null;
+  buildingAge: number | null;
+}
+
+export interface BuildingUnitTypeSummary {
+  exclusiveArea: number;             // m²
+  pyungType: number;                 // 평형
+  householdCount: number;
+  recentTradePrice: number | null;   // 만원
+  priceChangeRate: number | null;    // %
+  pricePerPyeong: number | null;     // 만원/평
+  pricePerM2: number | null;         // 만원/㎡
+  maxTradePrice: number | null;
+  minTradePrice: number | null;
+  recentRentDeposit: number | null;  // 만원 (전세)
+  jeonseRatio: number | null;        // %
+}
+
+export interface BuildingPriceTrendItem {
+  yearMonth: string;                 // 'YYYY-MM'
+  avgTradeAmount: number | null;     // 만원
+  tradeCount: number;
+  avgRentDeposit: number | null;     // 만원
+  rentCount: number;
+}
+
+export interface BuildingRecentTradeItem {
+  id: string;
+  tradeType: 'TRADE' | 'JEONSE' | 'MONTHLY' | string;
+  dealDate: string;                  // 'YYYY-MM-DD'
+  floor: number | null;
+  exclArea: number;
+  dealAmount: number | null;         // 매매/전세: 보증금 만원
+  monthlyRent: number | null;        // 월세: 만원
+  pricePerM2: number | null;
+}
+
+export interface BuildingDetailData {
+  buildingInfo: BuildingInfoSummary;
+  unitTypes: BuildingUnitTypeSummary[];
+  recentTrades: BuildingRecentTradeItem[];
+  priceTrends: BuildingPriceTrendItem[];
+}
+
 export interface UnitSizeStat {
   category: '소형' | '중형' | '대형';
   exclusiveAreaRange: string;

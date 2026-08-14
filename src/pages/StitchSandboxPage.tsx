@@ -17,10 +17,10 @@ export const StitchSandboxPage: React.FC = () => {
     setActiveModule('dong');
   };
 
-  // 백엔드 DB 실데이터: 유원목동아파트 (1147010100100870039)
-  const handleOpenYuwonMokdong = () => {
-    setTargetKey('1147010100100870039');
-    setTargetName('유원목동아파트');
+  // 백엔드 DB 실데이터: 신시가지아파트1단지 (1147010200109010000)
+  const handleOpenMokdong1Danji = () => {
+    setTargetKey('1147010200109010000');
+    setTargetName('신시가지아파트1단지');
     setActiveModule('building');
   };
 
@@ -233,7 +233,7 @@ export const StitchSandboxPage: React.FC = () => {
                 </p>
                 <div style={{ display: 'flex', gap: '10px' }}>
                   <button
-                    onClick={handleOpenYuwonMokdong}
+                    onClick={handleOpenMokdong1Danji}
                     style={{
                       backgroundColor: '#3E6844',
                       color: '#FFF',
@@ -245,7 +245,7 @@ export const StitchSandboxPage: React.FC = () => {
                       cursor: 'pointer',
                     }}
                   >
-                    [유원목동아파트 (DB실데이터)] →
+                    [신시가지아파트1단지 (DB실데이터)] →
                   </button>
                   <button
                     onClick={handleOpenYangcheonApt}

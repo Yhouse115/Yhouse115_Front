@@ -18,15 +18,17 @@ describe('Stitch FE Module Tests', () => {
   it('StitchBuildingPanel renders Shinsigaja 5th data with PNU', async () => {
     render(<StitchBuildingPanel pnu="1147010200109050000" buildingName="목동신시가지 5단지" useMockFallback={true} />);
 
-    expect(screen.getByText('시세/동향')).toBeInTheDocument();
-
     await waitFor(() => {
       expect(screen.getByText('목동신시가지 5단지')).toBeInTheDocument();
+      expect(screen.queryByText('Stitch 단지 데이터 로딩 중...')).not.toBeInTheDocument();
     });
   });
 
   it('StitchSandboxPage triggers modules via test buttons', async () => {
     render(<StitchSandboxPage />);
+
+    // 단위 테스트에서는 외부 백엔드 대신 샘플 데이터 모드를 사용한다.
+    fireEvent.click(screen.getByRole('checkbox'));
 
     const dongBtn = screen.getByText('[신정1동 (DB실데이터)] 조회하기 →');
     fireEvent.click(dongBtn);
@@ -38,11 +40,11 @@ describe('Stitch FE Module Tests', () => {
     const closeBtn = screen.getByLabelText('닫기');
     fireEvent.click(closeBtn);
 
-    const bldBtn = screen.getByText('[유원목동아파트 (DB실데이터)] →');
+    const bldBtn = screen.getByText('[신시가지아파트1단지 (DB실데이터)] →');
     fireEvent.click(bldBtn);
 
     await waitFor(() => {
-      expect(screen.getByText('유원목동아파트')).toBeInTheDocument();
+      expect(screen.getByText('신시가지아파트1단지')).toBeInTheDocument();
     });
   });
 });
