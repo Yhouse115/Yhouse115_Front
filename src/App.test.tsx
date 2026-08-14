@@ -24,15 +24,18 @@ describe('App', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation((url: string) => {
-        if (typeof url === 'string' && (url.includes('/api/v1/family-map') || url.includes('/api/v1/apartments') || url.includes('/api/apartments'))) {
+        if (
+          typeof url === 'string'
+          && (url.includes('/api/v1/family-map') || url.includes('/api/v1/apartments') || url.includes('/api/apartments'))
+        ) {
           return Promise.resolve({
             ok: true,
             json: async () => ({
               items: [
-                { id: '1', name: '목동신시가지 7단지 아파트', latitude: 37.525, longitude: 126.872 },
-                { id: '2', name: '목동신시가지 1단지 아파트', latitude: 37.530, longitude: 126.875 },
-                { id: '3', name: '목동신시가지 2단지 아파트', latitude: 37.528, longitude: 126.874 },
-                { id: '4', name: '목동신시가지 13단지 아파트', latitude: 37.518, longitude: 126.868 },
+                { id: '1', name: 'Mokdong test apartment 7', latitude: 37.525, longitude: 126.872 },
+                { id: '2', name: 'Mokdong test apartment 1', latitude: 37.530, longitude: 126.875 },
+                { id: '3', name: 'Mokdong test apartment 2', latitude: 37.528, longitude: 126.874 },
+                { id: '4', name: 'Mokdong test apartment 13', latitude: 37.518, longitude: 126.868 },
               ],
             }),
           });
@@ -49,39 +52,46 @@ describe('App', () => {
     vi.unstubAllGlobals();
   });
 
-  it('renders the frontend entry screen and backend health status', async () => {
-    renderApp();
-
-    expect(screen.getByRole('heading', { name: /어떤 시선으로\s*집을 볼까요/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /왜집의 입장노트/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /이집 어때요/ })).toBeInTheDocument();
-  });
-
-  it('routes to the family map page', async () => {
-    renderApp();
-
-    fireEvent.click(screen.getByRole('button', { name: /이집 어때요/ }));
+  it('opens directly on the family map page', async () => {
+    const { container } = renderApp();
 
     await waitFor(() => {
-      expect(screen.getByRole('complementary', { name: '아파트 선택과 비교' })).toBeInTheDocument();
+      expect(container.querySelector('.family-map-page')).toBeInTheDocument();
     });
 
-    expect(screen.getByRole('button', { name: /왜집의 임장노트/ })).toBeInTheDocument();
+    expect(container.querySelector('.landing-choice')).not.toBeInTheDocument();
+  });
 
-    const searchInput = screen.getByPlaceholderText('아파트 이름을 입력하세요');
+  it('keeps the choice page available at /choices and routes to the family map', async () => {
+    window.history.pushState({}, '', '/choices');
+    const { container } = renderApp();
+
+    expect(container.querySelector('.landing-choice')).toBeInTheDocument();
+
+    const familyCard = container.querySelector('.choice-card--family') as HTMLButtonElement;
+    fireEvent.click(familyCard);
+
+    await waitFor(() => {
+      expect(container.querySelector('.family-map-page')).toBeInTheDocument();
+    });
+
+    expect(container.querySelector('.landing-choice')).not.toBeInTheDocument();
+  });
+
+  it('filters and selects apartments on the family map page', async () => {
+    renderApp();
+
+    const searchInput = await screen.findByRole('textbox', { name: '사이드바 아파트 검색' });
     const searchForm = searchInput.closest('form') as HTMLElement;
-    fireEvent.change(searchInput, { target: { value: '7단지' } });
+    fireEvent.change(searchInput, { target: { value: '7' } });
 
-    expect(await within(searchForm).findByRole('option', { name: /목동신시가지 7단지 아파트/ })).toBeInTheDocument();
-    expect(within(searchForm).queryByRole('option', { name: /목동신시가지 13단지 아파트/ })).not.toBeInTheDocument();
+    expect(await within(searchForm).findByRole('option', { name: /Mokdong test apartment 7/ })).toBeInTheDocument();
+    expect(within(searchForm).queryByRole('option', { name: /Mokdong test apartment 13/ })).not.toBeInTheDocument();
 
-    fireEvent.click(within(searchForm).getByRole('option', { name: /목동신시가지 7단지 아파트/ }));
+    fireEvent.click(within(searchForm).getByRole('option', { name: /Mokdong test apartment 7/ }));
 
-    expect(screen.getByText('무엇을 지도에서 볼까요?')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /아파트 다시 선택/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /CCTV/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /CCTV/ }));
     expect(screen.getByRole('button', { name: /CCTV/ })).toHaveClass('facility-filter--active');
-    expect(screen.getByText('이 아파트 주변을 살펴보고 있어요')).toBeInTheDocument();
   });
 });

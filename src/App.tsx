@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 
 import { HealthCheck } from './components/HealthCheck';
 import { NaverMapPreview } from './components/NaverMapPreview';
+import { RenderingMapIntro } from './components/RenderingMapIntro';
 import { WhyHouseIntro } from './components/WhyHouseIntro';
 import { LoginButton } from './features/auth/LoginButton';
 import investmentImage from './assets/landing-investment-card.png';
@@ -12,6 +13,7 @@ import { StitchSandboxPage } from './pages/StitchSandboxPage';
 
 const routes = {
   home: '/',
+  choices: '/choices',
   investment: '/investment',
   familyMap: '/family-map',
   sandbox: '/sandbox',
@@ -130,10 +132,12 @@ function InvestmentPage() {
 
 function FamilyMapPage() {
   return (
-    <NaverMapPreview
-      onBackHome={() => navigateTo(routes.home)}
-      onOpenInvestment={() => navigateTo(routes.investment)}
-    />
+    <RenderingMapIntro>
+      <NaverMapPreview
+        onBackHome={() => navigateTo(routes.home)}
+        onOpenInvestment={() => navigateTo(routes.investment)}
+      />
+    </RenderingMapIntro>
   );
 }
 
@@ -167,8 +171,8 @@ export default function App() {
     return <InvestmentPage />;
   }
 
-  if (path === routes.familyMap) {
-    return <FamilyMapPage />;
+  if (path === routes.choices) {
+    return <LandingPage />;
   }
 
   if (path === routes.sandbox) {
@@ -179,40 +183,16 @@ export default function App() {
     return (
       <div className="intro-stack">
         <div className="intro-premounted-page" aria-hidden="true">
-          <LandingPage />
+          <FamilyMapPage />
         </div>
         <WhyHouseIntro onComplete={completeIntro} />
       </div>
     );
   }
 
-  return (
-    <>
-      <LandingPage />
-      {/* 개발 및 시운전용 Stitch FE Sandbox 플로팅 버튼 */}
-      <button
-        onClick={() => navigateTo(routes.sandbox)}
-        style={{
-          position: 'fixed',
-          bottom: '24px',
-          right: '24px',
-          zIndex: 9999,
-          backgroundColor: '#264159',
-          color: '#FFFFFF',
-          border: 'none',
-          borderRadius: '999px',
-          padding: '12px 20px',
-          fontWeight: 700,
-          fontSize: '13px',
-          cursor: 'pointer',
-          boxShadow: '0 8px 24px rgba(38,65,89,0.3)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-        }}
-      >
-        <span>🧪</span> Stitch 모듈 샌드박스 테스트
-      </button>
-    </>
-  );
+  if (path === routes.home || path === routes.familyMap) {
+    return <FamilyMapPage />;
+  }
+
+  return <FamilyMapPage />;
 }
