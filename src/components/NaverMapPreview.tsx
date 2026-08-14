@@ -1668,7 +1668,9 @@ export function NaverMapPreview({
   function changeFilter(nextFilter: FacilityKey) {
     if (nextFilter === 'all') {
       setActiveFilters((current) =>
-        current.length === facilityCategoryKeys.length ? [] : [...facilityCategoryKeys],
+        current.length === facilityCategoryKeys.length
+          ? [...defaultActiveFilters]
+          : [...facilityCategoryKeys],
       );
     } else {
       setActiveFilters((current) =>
@@ -1684,11 +1686,10 @@ export function NaverMapPreview({
   }
 
   function resetFilters() {
-    setActiveFilters(defaultActiveFilters);
-    setAnimatedFilter('all');
+    setActiveFilters([]);
+    setAnimatedFilter(null);
     setSelectedFacility(null);
     setMapEvidenceMetric(null);
-    window.setTimeout(() => setAnimatedFilter(null), 420);
   }
 
   function selectSuggestion(apartment: ApartmentSummary) {
