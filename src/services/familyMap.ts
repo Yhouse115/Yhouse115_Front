@@ -37,6 +37,13 @@ export type ApartmentSearchResponse = {
   items: ApartmentSummary[];
 };
 
+type BuildingPnuResolutionResponse = {
+  data: {
+    pnu: string;
+    buildingName?: string | null;
+  };
+};
+
 export type NearbyFeaturesResponse = {
   apartment: ApartmentSummary;
   radius_m: number;
@@ -151,6 +158,15 @@ export async function searchApartments(query: string, limit = 10) {
     return response;
   }
   return response?.items ?? [];
+}
+
+export async function resolveApartmentPnu(apartment: ApartmentSummary) {
+  const params = new URLSearchParams({ address: apartment.address });
+  if (apartment.household_count != null) {
+    params.set('household_count', String(apartment.household_count));
+  }
+  const response = await getJson<BuildingPnuResolutionResponse>('/api/v1/buildings/resolve-pnu', params);
+  return response.data;
 }
 
 export async function getNearbyFeatures(

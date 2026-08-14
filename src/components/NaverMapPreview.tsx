@@ -7,16 +7,19 @@ import waezipLogo from '../assets/waezip-logo.png';
 import {
   getNearbyFeatures,
   getWalkingRoute,
+  resolveApartmentPnu,
   searchApartments,
   type ApartmentSummary,
   type FacilityCategory,
   type FeatureSummary,
   type MapFeature,
   type WalkingRoute,
+  ApiRequestError,
   WalkingRouteNotFoundError,
 } from '../services/familyMap';
 import { logger } from '../services/logger';
 import { getUserMemo, saveUserMemo } from '../services/userMemo';
+import { StitchBuildingPanel } from '../features/stitch/components/StitchBuildingPanel';
 
 type MapStatus = 'loading' | 'ready' | 'missing-key' | 'error';
 type FacilityKey = 'all' | 'kids' | 'school' | 'crosswalk' | 'signal' | 'cctv' | 'risk';
@@ -484,6 +487,12 @@ export function NaverMapPreview({
   const [apartmentOptions, setApartmentOptions] = useState<ApartmentSummary[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedApartment, setSelectedApartment] = useState<ApartmentSummary | null>(null);
+  const [buildingDetail, setBuildingDetail] = useState<{
+    status: 'idle' | 'loading' | 'ready' | 'error';
+    pnu?: string;
+    buildingName?: string | null;
+    message?: string;
+  }>({ status: 'idle' });
   const [searchTerm, setSearchTerm] = useState('');
   const [topSearchOpen, setTopSearchOpen] = useState(false);
   const [activeFilters, setActiveFilters] = useState<ActiveFacilityKey[]>(defaultActiveFilters);
@@ -505,6 +514,30 @@ export function NaverMapPreview({
 
   const { session } = useAuth();
   const userId = session?.user?.id;
+
+  useEffect(() => {
+    setBuildingDetail({ status: 'idle' });
+  }, [selectedApartment?.id]);
+
+  const openBuildingDetail = async () => {
+    if (!selectedApartment || buildingDetail.status === 'loading') return;
+    setBuildingDetail({ status: 'loading' });
+    try {
+      const resolved = await resolveApartmentPnu(selectedApartment);
+      setBuildingDetail({
+        status: 'ready',
+        pnu: resolved.pnu,
+        buildingName: resolved.buildingName,
+      });
+    } catch (error) {
+      setBuildingDetail({
+        status: 'error',
+        message: error instanceof ApiRequestError && error.status === 404
+          ? '이 주소와 연결된 실거래 건축물을 찾지 못했습니다.'
+          : '건축물 연결 정보를 불러오지 못했습니다.',
+      });
+    }
+  };
 
   useEffect(() => {
     if (!userId) {
@@ -1454,12 +1487,25 @@ export function NaverMapPreview({
                 {selectedDestination && <button onClick={resetDestination} type="button">목적지 초기화</button>}
               </section>
 
-              <aside className="condition-apartment-card">
-                <small>선택 단지</small><h2>{selectedApartment.name}</h2><p>{selectedApartment.address}</p>
-                <dl>
-                  {selectedDestination ? <><div><dt>통학 목적지</dt><dd>{selectedDestination.name}</dd></div><div><dt>도보 시간</dt><dd>{selectedDestinationMinutes}분</dd></div><div><dt>횡단보도</dt><dd>{selectedDestinationCrosswalks}개</dd></div><div><dt>보행신호</dt><dd>{selectedDestinationSignals}개</dd></div><div><dt>CCTV</dt><dd>{selectedDestinationCctv}개</dd></div></> : <><div><dt>현재 상태</dt><dd>목적지 선택 전</dd></div><div><dt>분석 기준</dt><dd>실제 시설 좌표·큰길 경로</dd></div></>}
-                </dl>
-                <button onClick={onOpenInvestment} type="button">단지 상세 보기</button>
+              <aside className={`condition-apartment-card ${buildingDetail.status === 'ready' ? 'condition-apartment-card--detail' : ''}`}>
+                {buildingDetail.status === 'ready' && buildingDetail.pnu ? (
+                  <StitchBuildingPanel
+                    buildingName={buildingDetail.buildingName || selectedApartment.name}
+                    onClose={() => setBuildingDetail({ status: 'idle' })}
+                    pnu={buildingDetail.pnu}
+                  />
+                ) : (
+                  <>
+                    <small>선택 단지</small><h2>{selectedApartment.name}</h2><p>{selectedApartment.address}</p>
+                    <dl>
+                      {selectedDestination ? <><div><dt>통학 목적지</dt><dd>{selectedDestination.name}</dd></div><div><dt>도보 시간</dt><dd>{selectedDestinationMinutes}분</dd></div><div><dt>횡단보도</dt><dd>{selectedDestinationCrosswalks}개</dd></div><div><dt>보행신호</dt><dd>{selectedDestinationSignals}개</dd></div><div><dt>CCTV</dt><dd>{selectedDestinationCctv}개</dd></div></> : <><div><dt>현재 상태</dt><dd>목적지 선택 전</dd></div><div><dt>분석 기준</dt><dd>실제 시설 좌표·큰길 경로</dd></div></>}
+                    </dl>
+                    {buildingDetail.status === 'error' && <p className="condition-apartment-card__error" role="alert">{buildingDetail.message}</p>}
+                    <button disabled={buildingDetail.status === 'loading'} onClick={openBuildingDetail} type="button">
+                      {buildingDetail.status === 'loading' ? '건축물 연결 중…' : buildingDetail.status === 'error' ? '다시 시도' : '단지 상세 보기'}
+                    </button>
+                  </>
+                )}
               </aside>
 
               <aside className="condition-control-card">
