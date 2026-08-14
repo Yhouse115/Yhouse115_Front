@@ -1,7 +1,16 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
+import { AuthProvider } from '../features/auth/AuthContext';
 import { getNearbyFeatures, searchApartments } from '../services/familyMap';
 import { NaverMapPreview } from './NaverMapPreview';
+
+function renderMap() {
+  return render(
+    <AuthProvider>
+      <NaverMapPreview />
+    </AuthProvider>,
+  );
+}
 
 vi.mock('../services/familyMap', () => ({
   getNearbyFeatures: vi.fn(),
@@ -84,7 +93,7 @@ describe('NaverMapPreview', () => {
   });
 
   it('loads only the selected apartment nearby facilities within 1km', async () => {
-    render(<NaverMapPreview />);
+    renderMap();
 
     await waitFor(() => {
       expect(searchApartments).toHaveBeenCalledWith('', 1000);
@@ -103,7 +112,7 @@ describe('NaverMapPreview', () => {
   });
 
   it('zooms in when an apartment is selected and restores the zoom when its marker is clicked again', async () => {
-    render(<NaverMapPreview />);
+    renderMap();
 
     fireEvent.click(await screen.findByRole('button', { name: /Test Apartment/ }));
     expect(screen.getByText('현재 기준점')).toBeInTheDocument();
