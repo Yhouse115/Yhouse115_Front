@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 
 import { AuthProvider } from '../features/auth/AuthContext';
 import { compareApartments, getNearbyFeatures, searchApartments } from '../services/familyMap';
+import { getInvestmentMarketSummary } from '../services/investmentMarket';
 import { NaverMapPreview } from './NaverMapPreview';
 
 function renderMap() {
@@ -17,6 +18,26 @@ vi.mock('../services/familyMap', () => ({
   getNearbyFeatures: vi.fn(),
   searchApartments: vi.fn(),
 }));
+
+vi.mock('../services/investmentMarket', () => ({
+  formatAmountManwon: (value: number | null) => (value == null ? '-' : `${value}만`),
+  getInvestmentMarketSummary: vi.fn(),
+}));
+
+beforeEach(() => {
+  vi.mocked(getInvestmentMarketSummary).mockResolvedValue({
+    averageTradeAmount: 84000,
+    averageJeonseDeposit: 32500,
+    recentTradeCount: 2,
+    recentJeonseCount: 3,
+    tradeChangeRate: 1.2,
+    jeonseChangeRate: -0.8,
+    baseTradeAmount: 83000,
+    baseJeonseDeposit: 32700,
+    areaRows: [],
+    trend: [],
+  });
+});
 
 vi.mock('../config/env', () => ({
   env: {
@@ -222,30 +243,31 @@ describe('NaverMapPreview', () => {
     fireEvent.change(sidebarSearchInput, { target: { value: 'Test' } });
     fireEvent.click(await within(sidebarSearchForm).findByRole('option', { name: /Test Apartment/ }));
 
-    const compareSection = await screen.findByLabelText('아파트 비교');
-    const resultButton = within(compareSection).getByRole('button', { name: '비교 결과 보기' });
+    fireEvent.click(screen.getByRole('button', { name: /비교 결과.*0 \/ 2/ }));
+    const compareSection = await screen.findByLabelText('비교 결과 빠른 패널');
+    let resultButton = within(compareSection).getByRole('button', { name: '비교 분석 시작' });
     expect(resultButton).toBeDisabled();
 
     fireEvent.click(within(compareSection).getByRole('button', { name: '+ 비교 단지 추가' }));
     expect(screen.getByText('비교할 아파트를 선택하세요')).toBeInTheDocument();
-    expect(screen.getByText('처음 아파트를 고를 때처럼 검색 결과나 지도 위 단지 마커를 눌러 비교 후보를 확인하세요.')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('비교할 아파트 이름을 입력하세요')).toBeInTheDocument();
 
     fireEvent.change(sidebarSearchInput, { target: { value: 'Compare' } });
     fireEvent.click(await within(sidebarSearchForm).findByRole('option', { name: /Compare Apartment One/ }));
     fireEvent.click(screen.getByRole('button', { name: '비교함에 담기' }));
-
-    expect(within(compareSection).getByText('1 / 2')).toBeInTheDocument();
-    expect(within(compareSection).getByText(comparisonApartmentOne.name)).toBeInTheDocument();
+    let updatedCompareSection = await screen.findByLabelText('비교 결과 빠른 패널');
+    expect(within(updatedCompareSection).getByRole('button', { name: /비교 결과.*1 \/ 2/ })).toBeInTheDocument();
+    expect(within(updatedCompareSection).getByText(comparisonApartmentOne.name)).toBeInTheDocument();
+    resultButton = within(updatedCompareSection).getByRole('button', { name: '비교 분석 시작' });
     expect(resultButton).toBeEnabled();
 
-    fireEvent.click(within(compareSection).getByRole('button', { name: '+ 비교 단지 추가' }));
+    fireEvent.click(within(updatedCompareSection).getByRole('button', { name: '+ 비교 단지 추가' }));
     fireEvent.change(sidebarSearchInput, { target: { value: 'Compare' } });
     fireEvent.click(await within(sidebarSearchForm).findByRole('option', { name: /Compare Apartment Two/ }));
     fireEvent.click(screen.getByRole('button', { name: '비교함에 담기' }));
-
-    expect(within(compareSection).getByText('2 / 2')).toBeInTheDocument();
-    expect(within(compareSection).getByText(comparisonApartmentTwo.name)).toBeInTheDocument();
+    updatedCompareSection = await screen.findByLabelText('비교 결과 빠른 패널');
+    expect(within(updatedCompareSection).getByRole('button', { name: /비교 결과.*2 \/ 2/ })).toBeInTheDocument();
+    expect(within(updatedCompareSection).getByText(comparisonApartmentTwo.name)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '최대 2개까지 비교 가능' })).toBeDisabled();
   });
 
@@ -262,24 +284,24 @@ describe('NaverMapPreview', () => {
     fireEvent.change(sidebarSearchInput, { target: { value: 'Test' } });
     fireEvent.click(await within(sidebarSearchForm).findByRole('option', { name: /Test Apartment/ }));
 
-    const compareSection = await screen.findByLabelText('아파트 비교');
+    fireEvent.click(screen.getByRole('button', { name: /비교 결과.*0 \/ 2/ }));
+    const compareSection = await screen.findByLabelText('비교 결과 빠른 패널');
     fireEvent.click(within(compareSection).getByRole('button', { name: '+ 비교 단지 추가' }));
     fireEvent.change(sidebarSearchInput, { target: { value: 'Compare' } });
     fireEvent.click(await within(sidebarSearchForm).findByRole('option', { name: /Compare Apartment One/ }));
     fireEvent.click(screen.getByRole('button', { name: '비교함에 담기' }));
+    const updatedCompareSection = await screen.findByLabelText('비교 결과 빠른 패널');
+    fireEvent.click(within(updatedCompareSection).getByRole('button', { name: '비교 분석 시작' }));
 
-    fireEvent.click(within(compareSection).getByRole('button', { name: '비교 결과 보기' }));
-
-    expect(await screen.findByRole('complementary', { name: '아파트 비교 결과' })).toBeInTheDocument();
+    const resultSummary = await screen.findByLabelText('비교 결과 요약');
     expect(compareApartments).toHaveBeenCalledWith('apt-1', ['apt-2'], 1000);
-    expect(screen.getByText('핵심 지표 비교')).toBeInTheDocument();
-    expect(screen.getByText('교육·돌봄 선택지 많음')).toBeInTheDocument();
+    expect(within(resultSummary).getByText(/Compare Apartment One.*Test Apartment/)).toBeInTheDocument();
 
     await waitFor(() => {
       expect(markerOptions.some((option) => option.title === comparisonApartmentOne.name)).toBe(true);
     });
 
-    fireEvent.click(screen.getByRole('button', { name: '🧸 어린이시설 보기' }));
+    fireEvent.click(within(resultSummary).getByRole('button', { name: /어린이시설 지도 보기/ }));
 
     await waitFor(() => {
       expect(getNearbyFeatures).toHaveBeenCalledWith('apt-2', ['kids'], 1000);

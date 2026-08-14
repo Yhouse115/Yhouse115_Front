@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 import { env } from '../config/env';
 import { logger } from '../services/logger';
@@ -12,10 +12,9 @@ if (!isSupabaseConfigured) {
   });
 }
 
-const fallbackUrl = 'https://placeholder.supabase.co';
-const fallbackKey = 'placeholder-anon-key';
-
-export const supabase = createClient(
-  isSupabaseConfigured ? env.supabaseUrl : fallbackUrl,
-  isSupabaseConfigured ? env.supabaseAnonKey : fallbackKey,
-);
+// Do not construct a fake client. Supabase validates its URL during module
+// evaluation, which used to crash unrelated pages (including the map) when
+// local auth variables were intentionally omitted.
+export const supabase: SupabaseClient | null = isSupabaseConfigured
+  ? createClient(env.supabaseUrl, env.supabaseAnonKey)
+  : null;

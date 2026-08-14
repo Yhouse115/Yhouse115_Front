@@ -19,8 +19,14 @@ import {
 } from '../services/familyMap';
 import { logger } from '../services/logger';
 import { getUserMemo, saveUserMemo } from '../services/userMemo';
+import {
+  formatAmountManwon,
+  getInvestmentMarketSummary,
+  type InvestmentMarketSummary,
+} from '../services/investmentMarket';
 
 type MapStatus = 'loading' | 'ready' | 'missing-key' | 'error';
+type MarketStatus = 'idle' | 'loading' | 'ready' | 'error';
 type FacilityKey = 'all' | 'kids' | 'school' | 'crosswalk' | 'signal' | 'cctv' | 'risk';
 type ActiveFacilityKey = Exclude<FacilityKey, 'all'>;
 type MapView = 'life' | 'condition';
@@ -592,6 +598,7 @@ export function NaverMapPreview({
   const [dataStatus, setDataStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [apartmentOptions, setApartmentOptions] = useState<ApartmentSummary[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [compareDockOpen, setCompareDockOpen] = useState(false);
   const [selectedApartment, setSelectedApartment] = useState<ApartmentSummary | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [topSearchOpen, setTopSearchOpen] = useState(false);
@@ -656,6 +663,11 @@ export function NaverMapPreview({
       .then(() => setMemoStatus('saved'))
       .catch(() => setMemoStatus('error'));
   }
+
+  const [conditionNoteReady, setConditionNoteReady] = useState(false);
+  const [noteGateMessage, setNoteGateMessage] = useState('');
+  const [marketStatus, setMarketStatus] = useState<MarketStatus>('idle');
+  const [marketSummary, setMarketSummary] = useState<InvestmentMarketSummary | null>(null);
 
   const activeCategories = useMemo(() => getActiveCategories(activeFilters), [activeFilters]);
   const evidenceFeatures = useMemo(() => {
@@ -995,7 +1007,7 @@ export function NaverMapPreview({
     const triggerResize = () => window.naver?.maps.Event.trigger?.(map, 'resize');
     const timers = [0, 120, 300, 520].map((delay) => window.setTimeout(triggerResize, delay));
     return () => timers.forEach((timer) => window.clearTimeout(timer));
-  }, [sidebarOpen, selectedApartment?.id]);
+  }, [compareDockOpen, sidebarOpen, selectedApartment?.id]);
 
   useEffect(() => {
     const element = mapElementRef.current;
@@ -1167,6 +1179,32 @@ export function NaverMapPreview({
   }, [selectedApartment?.id, selectedDestination?.category, selectedDestination?.id]);
 
   useEffect(() => {
+    if (!conditionNoteReady || !selectedApartment) {
+      setMarketStatus('idle');
+      setMarketSummary(null);
+      return;
+    }
+
+    let cancelled = false;
+    setMarketStatus('loading');
+    getInvestmentMarketSummary(selectedApartment.name)
+      .then((summary) => {
+        if (cancelled) return;
+        setMarketSummary(summary);
+        setMarketStatus('ready');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setMarketSummary(null);
+        setMarketStatus('error');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [conditionNoteReady, selectedApartment]);
+
+  useEffect(() => {
     const map = mapRef.current;
     walkingRoutePolylineRef.current?.setMap(null);
     walkingRoutePolylineRef.current = null;
@@ -1199,7 +1237,7 @@ export function NaverMapPreview({
     }
 
     facilityMarkerRefs.current.forEach(({ marker }) => marker.setMap(null));
-    if (mapView === 'condition') {
+    if (mapView === 'condition' || !selectedApartment) {
       facilityMarkerRefs.current = [];
       return;
     }
@@ -1243,7 +1281,7 @@ export function NaverMapPreview({
       facilityMarkerRefs.current.forEach(({ marker }) => marker.setMap(null));
       facilityMarkerRefs.current = [];
     };
-  }, [displayMarkers, mapView]);
+  }, [displayMarkers, mapView, selectedApartment]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1333,6 +1371,8 @@ export function NaverMapPreview({
     setCompareResultOpen(false);
     setComparisonFeatureSets([]);
     setMapEvidenceMetric(null);
+    setConditionNoteReady(false);
+    setNoteGateMessage('');
 
     const map = mapRef.current;
     if (window.naver?.maps && map) {
@@ -1415,6 +1455,9 @@ export function NaverMapPreview({
   }
 
   function openSidebar() {
+    if (selectedApartment) {
+      deselectApartment();
+    }
     setSidebarOpen(true);
     setSelectedFacility(null);
     setPreviewApartment(null);
@@ -1455,6 +1498,8 @@ export function NaverMapPreview({
     setCompareResultOpen(false);
     setComparisonFeatureSets([]);
     setMapEvidenceMetric(null);
+    setSidebarOpen(false);
+    setCompareDockOpen(true);
   }
 
   function removeComparisonApartment(apartmentId: string) {
@@ -1470,11 +1515,13 @@ export function NaverMapPreview({
       return;
     }
     setComparisonSelectMode(true);
-    setSidebarOpen(true);
+    setSidebarOpen(false);
     setSelectedFacility(null);
     setPreviewApartment(null);
     setSearchTerm('');
+    setApartmentOptions(defaultApartmentOptionsRef.current);
     setMapEvidenceMetric(null);
+    setCompareDockOpen(false);
   }
 
   async function openCompareResult() {
@@ -1572,13 +1619,22 @@ export function NaverMapPreview({
       : [...current, category]);
   }
 
+  function openInvestmentNote() {
+    if (!selectedApartment) {
+      setNoteGateMessage('먼저 아파트를 선택해 주세요.');
+      return;
+    }
+
+    setNoteGateMessage('');
+    onOpenInvestment?.();
+  }
+
   return (
     <section className="family-map-page" aria-label="이집 어때요 생활 지도">
       <header className="family-map-bar">
         <button aria-label="왜집 홈" className="family-map-logo" onClick={onBackHome} type="button">
           <img alt="왜집?" src={waezipLogo} />
         </button>
-        <button aria-label="처음 화면으로 돌아가기" className="family-map-back" onClick={onBackHome} type="button">‹</button>
         <nav className="map-view-tabs" aria-label="지도 종류">
           <button className={mapView === 'life' ? 'is-active' : ''} onClick={() => setMapView('life')} type="button">생활환경 지도</button>
           <button className={mapView === 'condition' ? 'is-active' : ''} onClick={() => { setMapView('condition'); setSidebarOpen(false); setVisibleConditionCategories((current) => Array.from(new Set([...current, 'school', 'childcare', 'park', 'hospital']))); }} type="button">조건 지도</button>
@@ -1652,7 +1708,7 @@ export function NaverMapPreview({
                 value={searchTerm}
               />
             <button type="submit">검색</button>
-            {sidebarApartmentSuggestions.length > 0 && (
+            {searchTerm.trim().length > 0 && sidebarApartmentSuggestions.length > 0 && (
               <div className="apartment-suggestions" role="listbox">
                 {sidebarApartmentSuggestions.map((apartment) => (
                   <button key={apartment.id} onMouseDown={(event) => event.preventDefault()} onClick={() => selectSuggestion(apartment)} role="option" type="button">
@@ -1681,50 +1737,6 @@ export function NaverMapPreview({
               </button>
             ))}
           </div>
-
-          <section className="sidebar-compare" aria-label="아파트 비교">
-            <div className="compare-title-row">
-              <h3>아파트 비교</h3>
-              <span>{comparisonApartments.length} / 2</span>
-            </div>
-            <div className="compare-basket">
-              <div className="compare-basket-item compare-basket-item--base">
-                <small>기준</small>
-                <b>{selectedApartment?.name ?? '기준 아파트 미선택'}</b>
-              </div>
-              {comparisonApartments.map((apartment, index) => (
-                <div className="compare-basket-item" key={apartment.id}>
-                  <small>{index + 1}</small>
-                  <b>{apartment.name}</b>
-                  <button aria-label={`${apartment.name} 비교함에서 빼기`} onClick={() => removeComparisonApartment(apartment.id)} type="button">×</button>
-                </div>
-              ))}
-            </div>
-            <small className="compare-radius-note">선택 아파트 1km 이내 기준</small>
-            <button
-              className="compare-add-button"
-              disabled={!selectedApartment || comparisonApartments.length >= 2}
-              onClick={startComparisonSelection}
-              type="button"
-            >
-              {comparisonApartments.length >= 2 ? '최대 2개까지 비교 가능' : '+ 비교 단지 추가'}
-            </button>
-            {comparisonSelectMode && comparisonApartments.length < 2 && (
-              <div className="compare-selection-note" role="status">
-                처음 아파트를 고를 때처럼 검색 결과나 지도 위 단지 마커를 눌러 비교 후보를 확인하세요.
-              </div>
-            )}
-            <div className="facts">
-              {summaryItems.map((item) => (
-                <div className="fact" key={item.key}>
-                  <small>{item.label}</small>
-                  <b>{item.value}</b>
-                  <span>{comparisonApartments.length > 0 ? '비교 준비 중' : '1km 이내'}</span>
-                </div>
-              ))}
-            </div>
-            <button className="compare-result-button" disabled={comparisonApartments.length === 0} onClick={openCompareResult} type="button">비교 결과 보기</button>
-          </section>
 
           {compareResultOpen && selectedApartment && (
             <aside className="compare-result-panel" aria-label="아파트 비교 결과" role="complementary">
@@ -1826,6 +1838,7 @@ export function NaverMapPreview({
             {userId ? (
               <>
                 <textarea
+                  aria-label="비교 분석 메모"
                   disabled={memoStatus === 'loading'}
                   onChange={(event) => {
                     setMemoContent(event.target.value);
@@ -1842,20 +1855,25 @@ export function NaverMapPreview({
               </>
             ) : (
               <>
-                <textarea disabled placeholder="로그인하면 메모를 남길 수 있어요." />
+                <textarea aria-label="비교 분석 메모" disabled placeholder="로그인하면 메모를 남길 수 있어요." />
                 <button disabled type="button">메모 저장</button>
               </>
             )}
           </section>
 
-          <button className="go-note" onClick={onOpenInvestment} type="button">
-            <span aria-hidden="true">📝</span>
-            <div>
-              <b>왜집의 임장노트</b>
-              <small>투자 관점으로 이동하기</small>
-            </div>
-            <i>→</i>
-          </button>
+          {mapView === 'life' && (
+            <>
+              <button className="go-note" onClick={openInvestmentNote} type="button">
+                <span aria-hidden="true">📝</span>
+                <div>
+                  <b>왜집의 임장노트</b>
+                  <small>{selectedApartment ? `${selectedApartment.name} 상세 보기` : '아파트 선택 후 이용할 수 있어요'}</small>
+                </div>
+                <i>→</i>
+              </button>
+              <p className="note-gate-message" aria-live="polite">{noteGateMessage}</p>
+            </>
+          )}
         </aside>
 
         <div className="map-stage">
@@ -1863,6 +1881,168 @@ export function NaverMapPreview({
             <button className="sidebar-open-button" onClick={openSidebar} type="button">
               🏢 <span>아파트 선택</span>
             </button>
+          )}
+
+          {!sidebarOpen && mapView === 'life' && (
+            <aside
+              className={compareDockOpen ? 'compare-dock compare-dock--open' : 'compare-dock'}
+              aria-label="비교 결과 빠른 패널"
+            >
+              <button
+                aria-expanded={compareDockOpen}
+                className="compare-dock-toggle"
+                onClick={() => setCompareDockOpen((open) => !open)}
+                type="button"
+              >
+                <span aria-hidden="true">⇄</span>
+                <b>비교 결과</b>
+                <small>{comparisonApartments.length} / 2</small>
+                <i aria-hidden="true">{compareDockOpen ? '‹' : '›'}</i>
+              </button>
+
+              {compareDockOpen && (
+                <div className="compare-dock-body">
+                  <div className="compare-dock-heading">
+                    <div>
+                      <small>아파트 비교</small>
+                      <h2>아파트 비교 도구</h2>
+                    </div>
+                    <button aria-label="비교 패널 접기" onClick={() => setCompareDockOpen(false)} type="button">×</button>
+                  </div>
+
+                  <section className="compare-dock-section" aria-label="비교 담기">
+                    <div className="compare-dock-section-title">
+                      <span>1</span>
+                      <div><h3>비교 담기</h3><small>기준 단지와 비교할 아파트를 선택합니다.</small></div>
+                    </div>
+
+                    <div className="compare-basket compare-dock-basket">
+                      <div className="compare-basket-item compare-basket-item--base">
+                        <small>기준</small>
+                        <b>{selectedApartment?.name ?? '기준 아파트 미선택'}</b>
+                      </div>
+                      {comparisonApartments.map((apartment, index) => (
+                        <div className="compare-basket-item" key={apartment.id}>
+                          <small>{index + 1}</small>
+                          <b>{apartment.name}</b>
+                          <button aria-label={`${apartment.name} 비교함에서 빼기`} onClick={() => removeComparisonApartment(apartment.id)} type="button">×</button>
+                        </div>
+                      ))}
+                    </div>
+
+                    <small className="compare-radius-note">선택 아파트 1km 이내 기준</small>
+                    <button
+                      className="compare-add-button"
+                      disabled={!selectedApartment || comparisonApartments.length >= 2}
+                      onClick={startComparisonSelection}
+                      type="button"
+                    >
+                      {comparisonApartments.length >= 2 ? '최대 2개까지 비교 가능' : '+ 비교 단지 추가'}
+                    </button>
+                    {comparisonSelectMode && comparisonApartments.length < 2 && (
+                      <div className="compare-selection-note" role="status">
+                        검색 결과나 지도 위 단지 마커를 눌러 비교 후보를 확인하세요.
+                      </div>
+                    )}
+                  </section>
+
+                  <section className="compare-dock-section" aria-label="타 아파트와 비교 분석">
+                    <div className="compare-dock-section-title">
+                      <span>2</span>
+                      <div><h3>타 아파트와 비교 분석</h3><small>생활환경 지표와 차이를 분석합니다.</small></div>
+                    </div>
+
+                    <div className="facts compare-dock-facts">
+                      {summaryItems.map((item) => (
+                        <div className="fact" key={item.key}>
+                          <small>{item.label}</small>
+                          <b>{item.value}</b>
+                          <span>{comparisonApartments.length > 0 ? '비교 준비 중' : '1km 이내'}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <button
+                      className="compare-result-button"
+                      disabled={comparisonApartments.length === 0}
+                      onClick={openCompareResult}
+                      type="button"
+                    >
+                      비교 분석 시작
+                    </button>
+
+                    {compareResultStatus === 'loading' && <div className="compare-result-message">비교 결과를 계산하는 중입니다.</div>}
+                    {compareResultStatus === 'error' && <div className="compare-result-message compare-result-message--error">비교 결과를 불러오지 못했습니다.</div>}
+                    {compareResult && compareResultStatus === 'idle' && compareResultOpen && (
+                      <section className="compare-dock-result" aria-label="비교 결과 요약">
+                        <div className="compare-dock-result-title">
+                          <h3>비교 분석 결과</h3>
+                          <button aria-label="비교 결과 접기" onClick={() => setCompareResultOpen(false)} type="button">접기</button>
+                        </div>
+                        {compareResult.summary.map((item) => <p key={item}>{item}</p>)}
+                        <div className="compare-dock-metrics">
+                          {compareResult.metrics
+                            .filter((metric) => compareMetricOrder.includes(metric.code as ActiveFacilityKey))
+                            .map((metric) => (
+                              <button key={metric.code} onClick={() => focusMetricOnMap(metric.code as ActiveFacilityKey)} type="button">
+                                <span>{metric.label}</span>
+                                <b>{metric.base_count}{metric.unit}</b>
+                                <small>{metric.targets.map((target) => `${target.count}${metric.unit}`).join(' · ')}</small>
+                              </button>
+                            ))}
+                        </div>
+                        <div className="compare-dock-insights">
+                          {compareResult.targets.flatMap((target) =>
+                            target.insights.map((insight) => (
+                              <article className={`compare-insight compare-insight--${insight.tone}`} key={`${target.apartment.id}-${insight.category}-${insight.title}`}>
+                                <small>{target.apartment.name} · {compareSectionLabels[insight.category] ?? insight.category}</small>
+                                <b>{insight.title}</b>
+                                <p>{insight.description}</p>
+                              </article>
+                            )),
+                          )}
+                        </div>
+                        <div className="compare-map-actions compare-dock-map-actions">
+                          {compareMetricOrder.map((metricCode) => (
+                            <button key={metricCode} onClick={() => focusMetricOnMap(metricCode)} type="button">
+                              {facilityFilters.find((filter) => filter.key === metricCode)?.icon} {getFeatureLabel(metricCode)} 지도 보기
+                            </button>
+                          ))}
+                        </div>
+                      </section>
+                    )}
+                  </section>
+
+                  <section className="sidebar-memo compare-dock-memo">
+                    <h3>비교 분석 메모</h3>
+                    {userId ? (
+                      <>
+                        <textarea
+                          aria-label="빠른 비교 분석 메모"
+                          disabled={memoStatus === 'loading'}
+                          onChange={(event) => {
+                            setMemoContent(event.target.value);
+                            setMemoStatus('idle');
+                          }}
+                          placeholder="비교하며 발견한 점을 기록하세요."
+                          value={memoContent}
+                        />
+                        <button disabled={memoStatus === 'loading' || memoStatus === 'saving'} onClick={handleSaveMemo} type="button">
+                          {memoStatus === 'saving' ? '저장 중...' : '메모 저장'}
+                        </button>
+                        {memoStatus === 'saved' && <small className="memo-status">저장됐어요.</small>}
+                        {memoStatus === 'error' && <small className="memo-status memo-status--error">메모를 불러오지 못했어요. 다시 시도해주세요.</small>}
+                      </>
+                    ) : (
+                      <>
+                        <textarea aria-label="빠른 비교 분석 메모" disabled placeholder="로그인하면 메모를 남길 수 있어요." />
+                        <button disabled type="button">메모 저장</button>
+                      </>
+                    )}
+                  </section>
+                </div>
+              )}
+            </aside>
           )}
 
           {selectedApartment && !sidebarOpen && mapView === 'life' && (
@@ -1921,13 +2101,64 @@ export function NaverMapPreview({
                 {selectedDestination && <button onClick={resetDestination} type="button">목적지 초기화</button>}
               </section>
 
-              <aside className="condition-apartment-card">
+              {!conditionNoteReady && <aside className="condition-apartment-card">
                 <small>선택 단지</small><h2>{selectedApartment.name}</h2><p>{selectedApartment.address}</p>
                 <dl>
                   {selectedDestination ? <><div><dt>통학 목적지</dt><dd>{selectedDestination.name}</dd></div><div><dt>도보 시간</dt><dd>{selectedDestinationMinutes}분</dd></div><div><dt>횡단보도</dt><dd>{selectedDestinationCrosswalks}개</dd></div><div><dt>보행신호</dt><dd>{selectedDestinationSignals}개</dd></div><div><dt>CCTV</dt><dd>{selectedDestinationCctv}개</dd></div></> : <><div><dt>현재 상태</dt><dd>목적지 선택 전</dd></div><div><dt>분석 기준</dt><dd>실제 시설 좌표·큰길 경로</dd></div></>}
                 </dl>
-                <button onClick={onOpenInvestment} type="button">단지 상세 보기</button>
-              </aside>
+                <button onClick={() => setConditionNoteReady(true)} type="button">단지 상세 보기</button>
+              </aside>}
+
+              {conditionNoteReady && (
+                <aside className="condition-market-panel" aria-label="선택 단지 거래동향">
+                  <div className="market-strip-title">
+                    <small>거래동향</small>
+                    <b>{selectedApartment.name}</b>
+                    <span>최근 3개월</span>
+                  </div>
+                  {marketStatus === 'loading' && <p className="market-strip-state">거래 데이터를 불러오는 중입니다.</p>}
+                  {marketStatus === 'error' && <p className="market-strip-state">거래 데이터를 확인하지 못했습니다.</p>}
+                  {marketStatus === 'ready' && marketSummary && (
+                    <>
+                      <div className="market-strip-metrics">
+                        <div><small>평균 매매가</small><b>{formatAmountManwon(marketSummary.averageTradeAmount)} <em className={marketSummary.tradeChangeRate >= 0 ? 'is-up' : 'is-down'}>{marketSummary.tradeChangeRate >= 0 ? '▲' : '▼'} {Math.abs(marketSummary.tradeChangeRate)}%</em></b><span>최근 그룹별 기준</span></div>
+                        <div><small>평균 전세가</small><b>{formatAmountManwon(marketSummary.averageJeonseDeposit)} <em className={marketSummary.jeonseChangeRate >= 0 ? 'is-up' : 'is-down'}>{marketSummary.jeonseChangeRate >= 0 ? '▲' : '▼'} {Math.abs(marketSummary.jeonseChangeRate)}%</em></b><span>평균 전세율 기준</span></div>
+                      </div>
+                      <div className="market-area-heading">
+                        <small>평형별 시세</small>
+                        <span>매매 평균(증감) / 평균 전세가</span>
+                      </div>
+                      <div className="market-strip-areas">
+                        {marketSummary.areaRows.map((row) => (
+                          <div key={row.label}>
+                            <small>{row.label}<span>{row.range}</span></small>
+                            <b>{formatAmountManwon(row.averageTradeAmount)} <em className={row.tradeChangeRate >= 0 ? 'is-up' : 'is-down'}>{row.tradeChangeRate >= 0 ? '▲' : '▼'} {Math.abs(row.tradeChangeRate)}%</em></b>
+                            <span>{formatAmountManwon(row.averageJeonseDeposit)}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="market-chart-heading">
+                        <small>매매/전세 시세 비교</small>
+                        <span><i /> 매매 <i /> 전세</span>
+                      </div>
+                      <div className="market-strip-chart" aria-label="최근 거래량 그래프">
+                        {marketSummary.trend.map((item) => {
+                          const max = Math.max(...marketSummary.trend.flatMap((trendItem) => [trendItem.tradeCount, trendItem.jeonseCount]), 1);
+                          const tradeHeight = 18 + Math.round((item.tradeCount / max) * 58);
+                          const jeonseHeight = 18 + Math.round((item.jeonseCount / max) * 58);
+                          return (
+                            <i key={item.label}>
+                              <b style={{ height: `${tradeHeight}px` }} />
+                              <b style={{ height: `${jeonseHeight}px` }} />
+                              <span>{item.label}</span>
+                            </i>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
+                </aside>
+              )}
 
               <aside className="condition-control-card">
                 <div className="condition-control-title"><div><small>{conditionStep === 'route' ? '선택한 경로' : '목적지 탐색'}</small><h2>{conditionStep === 'route' ? '조건 분석' : '어디로 갈까요?'}</h2></div><button onClick={() => setDestinationMenuOpen((open) => !open)} type="button">✨</button></div>

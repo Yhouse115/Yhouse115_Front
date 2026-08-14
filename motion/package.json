@@ -1,0 +1,18 @@
+{
+  "name": "whyzip-motion-renderer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "studio": "remotion studio src/index.ts --no-open --public-dir=../public",
+    "qa:frames": "remotion still src/index.ts WhyzipMotion ../tmp/whyzip-qa.png --public-dir=../public --frame=414",
+    "render:mp4": "remotion render src/index.ts WhyzipMotion ../public/whyzip/intro/intro-dog-rife.mp4 --public-dir=../public --codec=h264 --crf=17",
+    "render:webm": "remotion render src/index.ts WhyzipMotion ../public/whyzip/intro/intro-dog-rife.webm --public-dir=../public --codec=vp8 --crf=12"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.0",
+    "@remotion/media": "^4.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "remotion": "^4.0.0"
+  }
+}
