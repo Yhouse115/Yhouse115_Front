@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { env } from '../config/env';
 import { LoginButton } from '../features/auth/LoginButton';
+import { useAuth } from '../features/auth/useAuth';
 import waezipHomeMarker from '../assets/waezip-home-marker.png';
 import waezipLogo from '../assets/waezip-logo.png';
 import {
@@ -12,6 +13,7 @@ import {
   type FeatureSummary,
   type MapFeature,
 } from '../services/familyMap';
+import { getUserMemo, saveUserMemo } from '../services/userMemo';
 
 type MapStatus = 'loading' | 'ready' | 'missing-key' | 'error';
 type FacilityKey = 'all' | 'kids' | 'school' | 'crosswalk' | 'signal' | 'cctv' | 'risk';
@@ -464,6 +466,46 @@ export function NaverMapPreview({
   const [conditionFeatures, setConditionFeatures] = useState<MapFeature[]>([]);
   const [visibleConditionCategories, setVisibleConditionCategories] = useState<ConditionCategory[]>(() => getSavedConditionState()?.visibleCategories ?? ['school', 'childcare']);
   const [destinationMenuOpen, setDestinationMenuOpen] = useState(false);
+  const [memoContent, setMemoContent] = useState('');
+  const [memoStatus, setMemoStatus] = useState<'idle' | 'loading' | 'saving' | 'saved' | 'error'>('idle');
+
+  const { session } = useAuth();
+  const userId = session?.user?.id;
+
+  useEffect(() => {
+    if (!userId) {
+      return;
+    }
+
+    let cancelled = false;
+    setMemoStatus('loading');
+    getUserMemo(userId)
+      .then((content) => {
+        if (!cancelled) {
+          setMemoContent(content);
+          setMemoStatus('idle');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMemoStatus('error');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  function handleSaveMemo() {
+    if (!userId) {
+      return;
+    }
+    setMemoStatus('saving');
+    saveUserMemo(userId, memoContent)
+      .then(() => setMemoStatus('saved'))
+      .catch(() => setMemoStatus('error'));
+  }
 
   const activeCategories = useMemo(() => getActiveCategories(activeFilters), [activeFilters]);
   const features = useMemo(
@@ -1051,8 +1093,29 @@ export function NaverMapPreview({
 
           <section className="sidebar-memo">
             <h3>비교 분석 메모</h3>
-            <textarea placeholder="비교하며 발견한 점을 기록하세요." />
-            <button type="button">메모 저장</button>
+            {userId ? (
+              <>
+                <textarea
+                  disabled={memoStatus === 'loading'}
+                  onChange={(event) => {
+                    setMemoContent(event.target.value);
+                    setMemoStatus('idle');
+                  }}
+                  placeholder="비교하며 발견한 점을 기록하세요."
+                  value={memoContent}
+                />
+                <button disabled={memoStatus === 'loading' || memoStatus === 'saving'} onClick={handleSaveMemo} type="button">
+                  {memoStatus === 'saving' ? '저장 중...' : '메모 저장'}
+                </button>
+                {memoStatus === 'saved' && <small className="memo-status">저장됐어요.</small>}
+                {memoStatus === 'error' && <small className="memo-status memo-status--error">메모를 불러오지 못했어요. 다시 시도해주세요.</small>}
+              </>
+            ) : (
+              <>
+                <textarea disabled placeholder="로그인하면 메모를 남길 수 있어요." />
+                <button disabled type="button">메모 저장</button>
+              </>
+            )}
           </section>
 
           <button className="go-note" onClick={onOpenInvestment} type="button">
