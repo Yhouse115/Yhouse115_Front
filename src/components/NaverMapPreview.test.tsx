@@ -40,6 +40,10 @@ function installNaverMapsMock() {
     setZIndex = vi.fn();
   }
 
+  class PolylineMock {
+    setMap = vi.fn();
+  }
+
   window.naver = {
     maps: {
       LatLng: class {},
@@ -47,6 +51,7 @@ function installNaverMapsMock() {
       Position: { BOTTOM_RIGHT: 'bottom-right' },
       Map: MapMock,
       Marker: MarkerMock,
+      Polyline: PolylineMock,
       Event: {
         addListener: vi.fn((target, eventName, listener) => {
           if (target instanceof MarkerMock && eventName === 'click') {
@@ -106,6 +111,7 @@ describe('NaverMapPreview', () => {
         1000,
       );
     });
+    expect(getNearbyFeatures).toHaveBeenCalledWith('apt-1', ['park'], 3000);
   });
 
   it('zooms in when an apartment is selected and restores the zoom when its marker is clicked again', async () => {
