@@ -44,6 +44,14 @@ type ConditionDestination = {
   signals: number;
   cctv: number;
 };
+type ConditionDestinationCluster = {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  count: number;
+  destinations: ConditionDestination[];
+};
 type RouteSafetyMarker = {
   id: string;
   category: 'crosswalk' | 'signal';
@@ -192,6 +200,7 @@ const conditionCategoryMeta: Record<ConditionCategory, { label: string; icon: st
 };
 
 const clusterMergeDistancePx = 49;
+const conditionClusterMergeDistancePx = 118;
 
 declare global {
   interface Window {
@@ -291,6 +300,23 @@ function getClusterMarkerIcon(count: number) {
       </span>
     `,
     anchor: window.naver ? new window.naver.maps.Point(30, 30) : undefined,
+  };
+}
+
+function getConditionClusterIcon(cluster: ConditionDestinationCluster) {
+  const primaryDestination = cluster.destinations[0];
+  const primaryMeta = conditionCategoryMeta[primaryDestination.category];
+  const categorySummary = Array.from(new Set(cluster.destinations.map((destination) => conditionCategoryMeta[destination.category].label))).join(' · ');
+
+  return {
+    content: `
+      <button class="condition-cluster-label" type="button" aria-label="${cluster.count}개 목적지 보기">
+        <span>${primaryMeta.icon}</span>
+        <b>${cluster.count}개 후보</b>
+        <small>${escapeHtml(categorySummary)} · 가까운 후보 ${primaryDestination.minutes}분</small>
+      </button>
+    `,
+    anchor: window.naver ? new window.naver.maps.Point(82, 28) : undefined,
   };
 }
 
@@ -573,6 +599,57 @@ function getDisplayMarkers(features: MapFeature[], zoom: number): DisplayMarker[
   return mergeClusterMarkersByOverlap(markers, zoom);
 }
 
+function getConditionDestinationClusters(destinations: ConditionDestination[], zoom: number): ConditionDestinationCluster[] {
+  if (zoom >= 18) {
+    return destinations.map((destination) => ({
+      id: destination.id,
+      name: destination.name,
+      latitude: destination.latitude,
+      longitude: destination.longitude,
+      count: 1,
+      destinations: [destination],
+    }));
+  }
+
+  const clusters: ConditionDestinationCluster[] = [];
+  for (const destination of destinations) {
+    const destinationPixel = projectMarkerToPixel(destination.latitude, destination.longitude, zoom);
+    const targetIndex = clusters.findIndex((cluster) => {
+      const clusterPixel = projectMarkerToPixel(cluster.latitude, cluster.longitude, zoom);
+      const distance = Math.hypot(destinationPixel.x - clusterPixel.x, destinationPixel.y - clusterPixel.y);
+      return distance <= conditionClusterMergeDistancePx;
+    });
+
+    if (targetIndex === -1) {
+      clusters.push({
+        id: destination.id,
+        name: destination.name,
+        latitude: destination.latitude,
+        longitude: destination.longitude,
+        count: 1,
+        destinations: [destination],
+      });
+      continue;
+    }
+
+    const target = clusters[targetIndex];
+    const destinationsInCluster = [...target.destinations, destination];
+    clusters[targetIndex] = {
+      id: destinationsInCluster.map((item) => item.id).join(':'),
+      name: `${destinationsInCluster.length}개 목적지`,
+      latitude: destinationsInCluster.reduce((sum, item) => sum + item.latitude, 0) / destinationsInCluster.length,
+      longitude: destinationsInCluster.reduce((sum, item) => sum + item.longitude, 0) / destinationsInCluster.length,
+      count: destinationsInCluster.length,
+      destinations: destinationsInCluster,
+    };
+  }
+
+  return clusters.map((cluster) => ({
+    ...cluster,
+    destinations: [...cluster.destinations].sort((a, b) => a.distance - b.distance),
+  }));
+}
+
 export function NaverMapPreview({
   onBackHome,
   onOpenInvestment,
@@ -618,6 +695,7 @@ export function NaverMapPreview({
   const [mapView, setMapView] = useState<MapView>('life');
   const [conditionStep, setConditionStep] = useState<'select' | 'route'>('select');
   const [selectedDestination, setSelectedDestination] = useState<ConditionDestination | null>(null);
+  const [selectedConditionCluster, setSelectedConditionCluster] = useState<ConditionDestinationCluster | null>(null);
   const [selectedSchoolRoute, setSelectedSchoolRoute] = useState<WalkingRoute | null>(null);
   const [walkingRouteStatus, setWalkingRouteStatus] = useState<WalkingRouteStatus>('idle');
   const [conditionFeatures, setConditionFeatures] = useState<MapFeature[]>([]);
@@ -784,6 +862,16 @@ export function NaverMapPreview({
         .slice(0, 6))
       .sort((a, b) => a.distance - b.distance);
   }, [conditionFeatures, selectedApartment]);
+  const visibleConditionCandidates = useMemo(
+    () => selectedDestination
+      ? conditionCandidates.filter((item) => item.id === selectedDestination.id)
+      : conditionCandidates.filter((item) => visibleConditionCategories.includes(item.category)),
+    [conditionCandidates, selectedDestination, visibleConditionCategories],
+  );
+  const conditionDestinationClusters = useMemo(
+    () => getConditionDestinationClusters(visibleConditionCandidates, currentZoom),
+    [currentZoom, visibleConditionCandidates],
+  );
   const selectedWalkingRoute = useMemo(
     () => selectedDestination && supportsStoredWalkingRoute(selectedDestination.category) ? selectedSchoolRoute : null,
     [selectedDestination, selectedSchoolRoute],
@@ -898,6 +986,7 @@ export function NaverMapPreview({
         window.naver.maps.Event.addListener(map, 'click', () => {
           setSelectedFacility(null);
           setPreviewApartment(null);
+          setSelectedConditionCluster(null);
         });
         setStatus('ready');
       })
@@ -1289,10 +1378,25 @@ export function NaverMapPreview({
     conditionMarkerRefs.current = [];
     if (mapView !== 'condition' || !map || !window.naver?.maps || !selectedApartment) return;
 
-    const visibleCandidates = selectedDestination
-      ? conditionCandidates.filter((item) => item.id === selectedDestination.id)
-      : conditionCandidates.filter((item) => visibleConditionCategories.includes(item.category));
-    conditionMarkerRefs.current = visibleCandidates.map((destination) => {
+    conditionMarkerRefs.current = conditionDestinationClusters.map((cluster) => {
+      if (cluster.count > 1) {
+        const marker = new window.naver!.maps.Marker({
+          position: new window.naver!.maps.LatLng(cluster.latitude, cluster.longitude),
+          map,
+          title: cluster.name,
+          zIndex: 92,
+          icon: getConditionClusterIcon(cluster),
+        });
+        window.naver!.maps.Event.addListener(marker, 'click', (event?: { stop?: () => void }) => {
+          event?.stop?.();
+          setSelectedConditionCluster(cluster);
+          setSelectedFacility(null);
+          setPreviewApartment(null);
+        });
+        return marker;
+      }
+
+      const destination = cluster.destinations[0];
         const isSelected = destination.id === selectedDestination?.id;
         const destinationRoute = isSelected ? selectedWalkingRoute : null;
         const destinationDistance = destinationRoute
@@ -1316,6 +1420,7 @@ export function NaverMapPreview({
             resetDestination();
             return;
           }
+          setSelectedConditionCluster(null);
           selectDestination(destination);
         });
         return marker;
@@ -1324,7 +1429,7 @@ export function NaverMapPreview({
       conditionMarkerRefs.current.forEach((marker) => marker.setMap(null));
       conditionMarkerRefs.current = [];
     };
-  }, [conditionCandidates, conditionStep, mapView, selectedApartment, selectedDestination, selectedWalkingRoute, visibleConditionCategories]);
+  }, [conditionDestinationClusters, conditionStep, mapView, selectedApartment, selectedDestination, selectedWalkingRoute]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1598,6 +1703,7 @@ export function NaverMapPreview({
 
   function selectDestination(destination: ConditionDestination) {
     setSelectedDestination(destination);
+    setSelectedConditionCluster(null);
     setSelectedSchoolRoute(null);
     setWalkingRouteStatus(supportsStoredWalkingRoute(destination.category) ? 'loading' : 'idle');
     setConditionStep('route');
@@ -1608,12 +1714,14 @@ export function NaverMapPreview({
   function resetDestination() {
     walkingRouteRequestIdRef.current += 1;
     setSelectedDestination(null);
+    setSelectedConditionCluster(null);
     setSelectedSchoolRoute(null);
     setWalkingRouteStatus('idle');
     setConditionStep('select');
   }
 
   function toggleConditionCategory(category: ConditionCategory) {
+    setSelectedConditionCluster(null);
     setVisibleConditionCategories((current) => current.includes(category)
       ? current.filter((item) => item !== category)
       : [...current, category]);
@@ -2165,6 +2273,30 @@ export function NaverMapPreview({
                 {conditionStep === 'route' && selectedDestination ? <div className="condition-metrics"><div><span>🚶</span><small>도보 시간</small><b>{selectedDestinationMinutes}분</b></div><div><span>🚸</span><small>횡단보도</small><b>{selectedDestinationCrosswalks}개</b></div><div><span>🚦</span><small>보행신호</small><b>{selectedDestinationSignals}개</b></div><div><span>📹</span><small>CCTV</small><b>{selectedDestinationCctv}개</b></div>{supportsStoredWalkingRoute(selectedDestination.category) && walkingRouteMessage && <p className="condition-route-status" role="status">{walkingRouteMessage}</p>}{selectedRouteSafetyMessage && <p className="condition-route-status" role="status">{selectedRouteSafetyMessage}</p>}<button onClick={resetDestination} type="button">다른 목적지 선택</button></div> : <div className="condition-categories">{(Object.entries(conditionCategoryMeta) as Array<[ConditionCategory, { label: string; icon: string }]>).map(([key, meta]) => <button className={visibleConditionCategories.includes(key) ? 'is-active' : ''} key={key} onClick={() => toggleConditionCategory(key)} type="button"><span>{meta.icon}</span>{meta.label}<small>{visibleConditionCategories.includes(key) ? '표시 중' : '선택'}</small></button>)}</div>}
                 {destinationMenuOpen && <div className="destination-menu">{conditionCandidates.map((item) => <button key={item.id} onClick={() => selectDestination(item)} type="button"><span>{conditionCategoryMeta[item.category].icon} {item.name}</span><small>도보 {item.minutes}분 · {item.distance}m</small></button>)}</div>}
               </aside>
+              {selectedConditionCluster && conditionStep === 'select' && (
+                <aside className="condition-cluster-sheet" aria-label="묶인 목적지 목록">
+                  <div className="condition-cluster-sheet-head">
+                    <div>
+                      <small>겹쳐진 목적지</small>
+                      <h2>{selectedConditionCluster.count}개 후보가 가까이 있어요</h2>
+                    </div>
+                    <button aria-label="목적지 목록 닫기" onClick={() => setSelectedConditionCluster(null)} type="button">×</button>
+                  </div>
+                  <div className="condition-cluster-list">
+                    {selectedConditionCluster.destinations.map((destination) => (
+                      <button key={destination.id} onClick={() => selectDestination(destination)} type="button">
+                        <span aria-hidden="true">{conditionCategoryMeta[destination.category].icon}</span>
+                        <div>
+                          <small>{conditionCategoryMeta[destination.category].label}</small>
+                          <b>{destination.name}</b>
+                          <em>{destination.address ?? '주소 정보 확인 중'}</em>
+                        </div>
+                        <strong>도보 {destination.minutes}분 · {destination.distance}m</strong>
+                      </button>
+                    ))}
+                  </div>
+                </aside>
+              )}
               {conditionStep === 'select' && conditionCandidates.length === 0 && <div className="condition-empty">주변 학교·공원·어린이집·병원 정보를 불러오는 중입니다.</div>}
             </>
           )}
