@@ -1592,7 +1592,6 @@ export function NaverMapPreview({
         <button aria-label="왜집 홈" className="family-map-logo" onClick={onBackHome} type="button">
           <img alt="왜집?" src={waezipLogo} />
         </button>
-        <button aria-label="처음 화면으로 돌아가기" className="family-map-back" onClick={onBackHome} type="button">‹</button>
         <nav className="map-view-tabs" aria-label="지도 종류">
           <button className={mapView === 'life' ? 'is-active' : ''} onClick={() => setMapView('life')} type="button">생활환경 지도</button>
           <button className={mapView === 'condition' ? 'is-active' : ''} onClick={() => { setMapView('condition'); setSidebarOpen(false); setVisibleConditionCategories((current) => Array.from(new Set([...current, 'school', 'childcare', 'park', 'hospital']))); }} type="button">조건 지도</button>

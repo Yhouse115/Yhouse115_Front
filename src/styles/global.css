@@ -1799,8 +1799,7 @@ a {
   background: #ffffff;
 }
 
-.family-map-logo,
-.family-map-back {
+.family-map-logo {
   min-height: 40px;
   border: 0;
   background: transparent;
@@ -1841,14 +1840,6 @@ a {
   display: block;
   width: 92px;
   height: auto;
-}
-
-.family-map-back {
-  width: 38px;
-  border-radius: 999px;
-  background: #f1f1f3;
-  font-size: 1.45rem;
-  line-height: 1;
 }
 
 .top-search {
