@@ -22,15 +22,9 @@ import {
 } from '../services/familyMap';
 import { logger } from '../services/logger';
 import { getUserMemo, saveUserMemo } from '../services/userMemo';
-import {
-  formatAmountManwon,
-  getInvestmentMarketSummary,
-  type InvestmentMarketSummary,
-} from '../services/investmentMarket';
 import { StitchBuildingPanel } from '../features/stitch/components/StitchBuildingPanel';
 
 type MapStatus = 'loading' | 'ready' | 'missing-key' | 'error';
-type MarketStatus = 'idle' | 'loading' | 'ready' | 'error';
 type FacilityKey = 'all' | 'kids' | 'school' | 'crosswalk' | 'signal' | 'cctv' | 'risk';
 type ActiveFacilityKey = Exclude<FacilityKey, 'all'>;
 type MapView = 'life' | 'condition';
@@ -871,10 +865,7 @@ export function NaverMapPreview({
       .catch(() => setMemoStatus('error'));
   }
 
-  const [conditionNoteReady, setConditionNoteReady] = useState(false);
   const [noteGateMessage, setNoteGateMessage] = useState('');
-  const [marketStatus, setMarketStatus] = useState<MarketStatus>('idle');
-  const [marketSummary, setMarketSummary] = useState<InvestmentMarketSummary | null>(null);
 
   const activeCategories = useMemo(() => getActiveCategories(activeFilters), [activeFilters]);
   const evidenceFeatures = useMemo(() => {
@@ -1413,32 +1404,6 @@ export function NaverMapPreview({
   }, [selectedApartment?.id, selectedDestination?.category, selectedDestination?.id]);
 
   useEffect(() => {
-    if (!conditionNoteReady || !selectedApartment) {
-      setMarketStatus('idle');
-      setMarketSummary(null);
-      return;
-    }
-
-    let cancelled = false;
-    setMarketStatus('loading');
-    getInvestmentMarketSummary(selectedApartment.name)
-      .then((summary) => {
-        if (cancelled) return;
-        setMarketSummary(summary);
-        setMarketStatus('ready');
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setMarketSummary(null);
-        setMarketStatus('error');
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [conditionNoteReady, selectedApartment]);
-
-  useEffect(() => {
     const map = mapRef.current;
     walkingRoutePolylineRef.current?.setMap(null);
     walkingRoutePolylineRef.current = null;
@@ -1617,7 +1582,6 @@ export function NaverMapPreview({
     setCompareResultOpen(false);
     setComparisonFeatureSets([]);
     setMapEvidenceMetric(null);
-    setConditionNoteReady(false);
     setNoteGateMessage('');
 
     const map = mapRef.current;
@@ -2369,63 +2333,9 @@ export function NaverMapPreview({
                     <button disabled={buildingDetail.status === 'loading'} onClick={openBuildingDetail} type="button">
                       {buildingDetail.status === 'loading' ? '건축물 연결 중…' : buildingDetail.status === 'error' ? '다시 시도' : '단지 상세 보기'}
                     </button>
-                    <button onClick={() => setConditionNoteReady((current) => !current)} type="button">
-                      {conditionNoteReady ? '거래동향 닫기' : '거래동향 요약'}
-                    </button>
                   </>
                 )}
               </aside>
-
-              {conditionNoteReady && buildingDetail.status !== 'ready' && (
-                <aside className="condition-market-panel" aria-label="선택 단지 거래동향">
-                  <div className="market-strip-title">
-                    <small>거래동향</small>
-                    <b>{selectedApartment.name}</b>
-                    <span>최근 3개월</span>
-                  </div>
-                  {marketStatus === 'loading' && <p className="market-strip-state">거래 데이터를 불러오는 중입니다.</p>}
-                  {marketStatus === 'error' && <p className="market-strip-state">거래 데이터를 확인하지 못했습니다.</p>}
-                  {marketStatus === 'ready' && marketSummary && (
-                    <>
-                      <div className="market-strip-metrics">
-                        <div><small>평균 매매가</small><b>{formatAmountManwon(marketSummary.averageTradeAmount)} <em className={marketSummary.tradeChangeRate >= 0 ? 'is-up' : 'is-down'}>{marketSummary.tradeChangeRate >= 0 ? '▲' : '▼'} {Math.abs(marketSummary.tradeChangeRate)}%</em></b><span>최근 그룹별 기준</span></div>
-                        <div><small>평균 전세가</small><b>{formatAmountManwon(marketSummary.averageJeonseDeposit)} <em className={marketSummary.jeonseChangeRate >= 0 ? 'is-up' : 'is-down'}>{marketSummary.jeonseChangeRate >= 0 ? '▲' : '▼'} {Math.abs(marketSummary.jeonseChangeRate)}%</em></b><span>평균 전세율 기준</span></div>
-                      </div>
-                      <div className="market-area-heading">
-                        <small>평형별 시세</small>
-                        <span>매매 평균(증감) / 평균 전세가</span>
-                      </div>
-                      <div className="market-strip-areas">
-                        {marketSummary.areaRows.map((row) => (
-                          <div key={row.label}>
-                            <small>{row.label}<span>{row.range}</span></small>
-                            <b>{formatAmountManwon(row.averageTradeAmount)} <em className={row.tradeChangeRate >= 0 ? 'is-up' : 'is-down'}>{row.tradeChangeRate >= 0 ? '▲' : '▼'} {Math.abs(row.tradeChangeRate)}%</em></b>
-                            <span>{formatAmountManwon(row.averageJeonseDeposit)}</span>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="market-chart-heading">
-                        <small>매매/전세 시세 비교</small>
-                        <span><i /> 매매 <i /> 전세</span>
-                      </div>
-                      <div className="market-strip-chart" aria-label="최근 거래량 그래프">
-                        {marketSummary.trend.map((item) => {
-                          const max = Math.max(...marketSummary.trend.flatMap((trendItem) => [trendItem.tradeCount, trendItem.jeonseCount]), 1);
-                          const tradeHeight = 18 + Math.round((item.tradeCount / max) * 58);
-                          const jeonseHeight = 18 + Math.round((item.jeonseCount / max) * 58);
-                          return (
-                            <i key={item.label}>
-                              <b style={{ height: `${tradeHeight}px` }} />
-                              <b style={{ height: `${jeonseHeight}px` }} />
-                              <span>{item.label}</span>
-                            </i>
-                          );
-                        })}
-                      </div>
-                    </>
-                  )}
-                </aside>
-              )}
 
               <aside className="condition-control-card">
                 <div className="condition-control-title"><div><small>{conditionStep === 'route' ? '선택한 경로' : '목적지 탐색'}</small><h2>{conditionStep === 'route' ? '조건 분석' : '어디로 갈까요?'}</h2></div><button onClick={() => setDestinationMenuOpen((open) => !open)} type="button">✨</button></div>
@@ -2507,7 +2417,6 @@ export function NaverMapPreview({
               <b>{previewApartment.name}</b>
               <span>{previewApartment.address}</span>
               <div className="apartment-preview-actions">
-                <button onClick={onOpenInvestment} type="button">단지 자세히 보기</button>
                 <button onClick={() => selectApartment(previewApartment)} type="button">기준 아파트로 선택</button>
               </div>
             </aside>
@@ -2525,7 +2434,6 @@ export function NaverMapPreview({
                 <span>보행신호 {getSummaryCount(compareSummary, 'signal')}개</span>
               </div>
               <div className="apartment-preview-actions">
-                <button onClick={onOpenInvestment} type="button">단지 자세히 보기</button>
                 {comparisonApartments.some((apartment) => apartment.id === previewApartment.id) ? (
                   <button onClick={() => removeComparisonApartment(previewApartment.id)} type="button">비교함에서 빼기</button>
                 ) : (

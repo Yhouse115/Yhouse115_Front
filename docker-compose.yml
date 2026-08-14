@@ -33,7 +33,6 @@ services:
       API_PREFIX: ${API_PREFIX:-/api/v1}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://whyhouse:whyhouse@database:5432/whyhouse}
       NAVER_MAPS_GEOCODE_BASE_URL: ${NAVER_MAPS_GEOCODE_BASE_URL:-https://maps.apigw.ntruss.com/map-geocode/v2}
       NAVER_MAPS_REVERSE_GEOCODE_BASE_URL: ${NAVER_MAPS_REVERSE_GEOCODE_BASE_URL:-https://maps.apigw.ntruss.com/map-reversegeocode/v2}
     ports:
