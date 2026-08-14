@@ -1,0 +1,163 @@
+/**
+ * Stitch FE 모듈 인터페이스 및 DTO 타입 정의
+ */
+
+export interface StitchDongPanelProps {
+  adminDongCode: string;
+  dongName?: string;
+  onClose?: () => void;
+  useMockFallback?: boolean;
+}
+
+export interface StitchBuildingPanelProps {
+  pnu: string;
+  buildingName?: string;
+  onClose?: () => void;
+  useMockFallback?: boolean;
+}
+
+// ─── 건축물 단위 타입 (BE /buildings/{pnu}/summary 응답 매핑) ───
+
+export interface BuildingInfoSummary {
+  pnu: string;
+  buildingName: string | null;
+  buildingType: string | null;       // 'APT' | 'TOWNHOUSE' | 'OFFICETEL'
+  adminDongCode: string | null;
+  adminDongName: string | null;
+  legalDongCode: string | null;
+  legalDongName: string | null;
+  jibunAddress: string | null;
+  jibun: string | null;
+  totalHouseholds: number | null;
+  totalParking: number | null;
+  parkingPerHousehold: number | null;
+  useApprovalDate: string | null;    // 'YYYY-MM-DD'
+  buildYear: number | null;
+  buildingAge: number | null;
+}
+
+export interface BuildingUnitTypeSummary {
+  exclusiveArea: number;             // m²
+  pyungType: number;                 // 평형
+  householdCount: number;
+  recentTradePrice: number | null;   // 만원
+  priceChangeRate: number | null;    // %
+  pricePerPyeong: number | null;     // 만원/평
+  pricePerM2: number | null;         // 만원/㎡
+  maxTradePrice: number | null;
+  minTradePrice: number | null;
+  recentRentDeposit: number | null;  // 만원 (전세)
+  jeonseRatio: number | null;        // %
+}
+
+export interface BuildingPriceTrendItem {
+  yearMonth: string;                 // 'YYYY-MM'
+  avgTradeAmount: number | null;     // 만원
+  tradeCount: number;
+  avgRentDeposit: number | null;     // 만원
+  rentCount: number;
+}
+
+export interface BuildingRecentTradeItem {
+  id: string;
+  tradeType: 'TRADE' | 'JEONSE' | 'MONTHLY' | string;
+  dealDate: string;                  // 'YYYY-MM-DD'
+  floor: number | null;
+  exclArea: number;
+  dealAmount: number | null;         // 매매/전세: 보증금 만원
+  monthlyRent: number | null;        // 월세: 만원
+  pricePerM2: number | null;
+}
+
+export interface BuildingDetailData {
+  buildingInfo: BuildingInfoSummary;
+  unitTypes: BuildingUnitTypeSummary[];
+  recentTrades: BuildingRecentTradeItem[];
+  priceTrends: BuildingPriceTrendItem[];
+}
+
+export interface UnitSizeStat {
+  category: '소형' | '중형' | '대형';
+  exclusiveAreaRange: string;
+  avgTradePrice?: number | null;
+  priceChangeRate?: number | null;
+  medianPyeongPrice?: number | null;
+  medianPrice?: number | null;
+  minPrice?: number | null;
+  maxPrice?: number | null;
+  tradeCount: number;
+  avgRentDeposit?: number | null;
+  rentChangeRate?: number | null;
+  medianRentPyeongPrice?: number | null;
+  rentCount: number;
+}
+
+export interface DongSummaryData {
+  adminDongCode: string;
+  adminDongName: string;
+  comparisonMode?: 'prev_period' | 'yoy';
+  inventory: {
+    aptCount: number;
+    villaCount: number;
+    officetelCount: number;
+    totalCount: number;
+  };
+  priceTrends: {
+    periodMonths: number;
+    avgTradePrice: number; // 만원 단위
+    avgRentPrice: number; // 만원 단위
+    tradePriceChangeRate: number; // %
+    jeonseRate: number; // %
+  };
+  baseDongStats?: {
+    avgTradePrice?: number | null;
+    medianTradePrice?: number | null;
+    priceChangeRate?: number | null;
+    medianPyeongPrice?: number | null;
+    avgRentDeposit?: number | null;
+    medianRentDeposit?: number | null;
+    rentChangeRate?: number | null;
+    medianRentPyeongPrice?: number | null;
+    jeonseRatio?: number | null;
+  };
+  unitSizeStats?: UnitSizeStat[];
+  neighborComparison: {
+    dongName: string;
+    avgPrice: number;
+    jeonseRate: number;
+  }[];
+}
+
+export interface BuildingSummaryData {
+  pnu: string;
+  buildingName: string;
+  address: string;
+  buildYear: number;
+  totalUnits: number;
+  totalBuildings: number;
+  latestTradePrice: number; // 만원 단위 (e.g. 185000 = 18억 5,000만원)
+  latestTradeDate: string; // e.g. "2026.02.10"
+  tradePriceChangeRate: number; // % (e.g. 3.2)
+  jeonseRate: number; // % (e.g. 52.4)
+  estimatedRentDeposit: number; // 만원 단위
+  estimatedMonthlyRent: number; // 만원 단위
+  unitTypes: {
+    name: string; // e.g. "84㎡ (34평)"
+    units: number;
+    tradePrice: number;
+    rentPrice: number;
+  }[];
+  recentTransactions: {
+    date: string;
+    tradeType: '매매' | '전세' | '월세';
+    area: number;
+    floor: number;
+    price: string;
+  }[];
+  developmentInfo?: {
+    projectName: string;
+    stageName: string;
+    stageStep: number; // 1~6
+    updatedAt: string;
+  };
+}
