@@ -2034,6 +2034,24 @@ a {
   margin: 7px 0 0 auto;
 }
 
+.sidebar-memo button:disabled,
+.sidebar-memo textarea:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.memo-status {
+  display: block;
+  margin-top: 6px;
+  color: #347a49;
+  font-size: 0.75rem;
+  text-align: right;
+}
+
+.memo-status--error {
+  color: #c23b3b;
+}
+
 .go-note {
   display: grid;
   grid-template-columns: 34px 1fr 18px;
