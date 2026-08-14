@@ -94,6 +94,48 @@ export class WalkingRouteNotFoundError extends Error {
   }
 }
 
+export type CompareMetricTarget = {
+  apartment_id: string;
+  count: number;
+  diff: number;
+  comparison: 'target_more' | 'base_more' | 'similar';
+  label: string;
+  tone: 'positive' | 'caution' | 'context' | 'neutral';
+};
+
+export type CompareMetric = {
+  code: FacilityCategory;
+  label: string;
+  unit: string;
+  base_count: number;
+  targets: CompareMetricTarget[];
+};
+
+export type CompareInsight = {
+  category: string;
+  title: string;
+  description: string;
+  tone: 'positive' | 'caution' | 'context' | 'neutral';
+  metric_codes: FacilityCategory[];
+};
+
+export type CompareApartmentTarget = {
+  apartment: ApartmentSummary;
+  metrics: Partial<Record<FacilityCategory, number>>;
+  summary: string;
+  insights: CompareInsight[];
+};
+
+export type ApartmentCompareResponse = {
+  base: ApartmentSummary;
+  radius_m: number;
+  categories: FacilityCategory[];
+  base_metrics: Partial<Record<FacilityCategory, number>>;
+  targets: CompareApartmentTarget[];
+  metrics: CompareMetric[];
+  summary: string[];
+};
+
 const responseCache = new Map<string, { expiresAt: number; value: unknown }>();
 const pendingRequests = new Map<string, Promise<unknown>>();
 const CACHE_TTL_MS = 20_000;
@@ -132,6 +174,44 @@ async function getJson<T>(path: string, params?: URLSearchParams): Promise<T> {
     });
 
   pendingRequests.set(url, request);
+  return request;
+}
+
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  const url = apiUrl(path);
+  const cacheKey = `${url}:${JSON.stringify(body)}`;
+  const cached = responseCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value as T;
+  }
+
+  const pending = pendingRequests.get(cacheKey);
+  if (pending) {
+    return pending as Promise<T>;
+  }
+
+  const request = fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  })
+    .then((response) => {
+      if (!response.ok) {
+        throw new Error(`API request failed: ${response.status}`);
+      }
+      return response.json() as Promise<T>;
+    })
+    .then((value) => {
+      responseCache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, value });
+      return value;
+    })
+    .finally(() => {
+      pendingRequests.delete(cacheKey);
+    });
+
+  pendingRequests.set(cacheKey, request);
   return request;
 }
 
@@ -265,4 +345,16 @@ export async function getWalkingRoute(complexId: string, featureId: string): Pro
     }
     throw error;
   }
+}
+
+export async function compareApartments(
+  baseApartmentId: string,
+  targetApartmentIds: string[],
+  radiusM = 1000,
+) {
+  return postJson<ApartmentCompareResponse>('/api/v1/family-map/apartments/compare', {
+    base_apartment_id: baseApartmentId,
+    target_apartment_ids: targetApartmentIds,
+    radius_m: radiusM,
+  });
 }
