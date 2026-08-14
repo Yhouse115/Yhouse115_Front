@@ -964,7 +964,7 @@ export function NaverMapPreview({
     const triggerResize = () => window.naver?.maps.Event.trigger?.(map, 'resize');
     const timers = [0, 120, 300, 520].map((delay) => window.setTimeout(triggerResize, delay));
     return () => timers.forEach((timer) => window.clearTimeout(timer));
-  }, [sidebarOpen, selectedApartment?.id]);
+  }, [compareDockOpen, sidebarOpen, selectedApartment?.id]);
 
   useEffect(() => {
     const element = mapElementRef.current;
@@ -1472,11 +1472,13 @@ export function NaverMapPreview({
       return;
     }
     setComparisonSelectMode(true);
-    setSidebarOpen(true);
+    setSidebarOpen(false);
     setSelectedFacility(null);
     setPreviewApartment(null);
     setSearchTerm('');
+    setApartmentOptions(defaultApartmentOptionsRef.current);
     setMapEvidenceMetric(null);
+    setCompareDockOpen(false);
   }
 
   async function openCompareResult() {
