@@ -3455,6 +3455,31 @@ a {
   transform: rotate(-45deg) scale(1.15);
 }
 
+.route-cctv-pin {
+  position: relative;
+  background: #9b6de7 !important;
+  box-shadow: 0 5px 14px rgba(155, 109, 231, .18) !important;
+  opacity: .6 !important;
+}
+
+.route-cctv-pin em {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 999px;
+  background: #9b6de7;
+  color: #fff;
+  font-size: .62rem;
+  font-style: normal;
+  font-weight: 900;
+  line-height: 1;
+  transform: rotate(45deg);
+}
+
 .map-cluster-pin {
   position: relative;
   display: grid;

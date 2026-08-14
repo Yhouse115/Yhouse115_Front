@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { env } from '../config/env';
 import { useAuth } from '../features/auth/useAuth';
+import { LoginButton } from '../features/auth/LoginButton';
 import waezipHomeMarker from '../assets/waezip-home-marker.png';
 import waezipLogo from '../assets/waezip-logo.png';
 import {
@@ -54,10 +55,11 @@ type ConditionDestinationCluster = {
 };
 type RouteSafetyMarker = {
   id: string;
-  category: 'crosswalk' | 'signal';
+  category: 'crosswalk' | 'signal' | 'cctv';
   name: string;
   latitude: number;
   longitude: number;
+  count?: number;
 };
 type WalkingRouteStatus = 'idle' | 'loading' | 'ready' | 'not-found' | 'error';
 
@@ -201,6 +203,10 @@ const conditionCategoryMeta: Record<ConditionCategory, { label: string; icon: st
 
 const clusterMergeDistancePx = 49;
 const conditionClusterMergeDistancePx = 118;
+const sameCrosswalkMergeDistanceMeters = 35;
+const routeCctvMarkerSizePx = 38;
+const routeCctvClusterOverlapRatio = 0.4;
+const routeCctvClusterDistancePx = routeCctvMarkerSizePx * (1 - routeCctvClusterOverlapRatio);
 
 declare global {
   interface Window {
@@ -300,6 +306,22 @@ function getClusterMarkerIcon(count: number) {
       </span>
     `,
     anchor: window.naver ? new window.naver.maps.Point(30, 30) : undefined,
+  };
+}
+
+function getRouteSafetyMarkerIcon(feature: RouteSafetyMarker) {
+  const icon = feature.category === 'crosswalk' ? '🚸' : feature.category === 'signal' ? '🚦' : '📹';
+  const className = feature.category === 'cctv' ? 'map-pin map-pin--facility route-cctv-pin' : 'map-pin map-pin--facility';
+  const count = feature.count ?? 1;
+
+  return {
+    content: `
+      <span class="${className}" style="--pin-color: ${facilityColors[feature.category]};">
+        <span>${icon}</span>
+        ${feature.category === 'cctv' && count > 1 ? `<em>${count}</em>` : ''}
+      </span>
+    `,
+    anchor: window.naver ? new window.naver.maps.Point(21, 44) : undefined,
   };
 }
 
@@ -650,6 +672,80 @@ function getConditionDestinationClusters(destinations: ConditionDestination[], z
   }));
 }
 
+function mergeDuplicateCrosswalkMarkers(markers: RouteSafetyMarker[]): RouteSafetyMarker[] {
+  const merged: RouteSafetyMarker[] = [];
+
+  for (const marker of markers) {
+    if (marker.category !== 'crosswalk') {
+      merged.push(marker);
+      continue;
+    }
+
+    const duplicateIndex = merged.findIndex((candidate) =>
+      candidate.category === 'crosswalk'
+      && distanceMeters(candidate.latitude, candidate.longitude, marker.latitude, marker.longitude) <= sameCrosswalkMergeDistanceMeters,
+    );
+
+    if (duplicateIndex === -1) {
+      merged.push(marker);
+      continue;
+    }
+
+    const duplicate = merged[duplicateIndex];
+    merged[duplicateIndex] = {
+      ...duplicate,
+      id: `${duplicate.id}:${marker.id}`,
+      latitude: (duplicate.latitude + marker.latitude) / 2,
+      longitude: (duplicate.longitude + marker.longitude) / 2,
+    };
+  }
+
+  return merged;
+}
+
+function mergeOverlappingRouteCctvMarkers(markers: RouteSafetyMarker[], zoom: number): RouteSafetyMarker[] {
+  const merged: RouteSafetyMarker[] = [];
+
+  for (const marker of markers) {
+    if (marker.category !== 'cctv') {
+      merged.push(marker);
+      continue;
+    }
+
+    const markerPoint = projectMarkerToPixel(marker.latitude, marker.longitude, zoom);
+    const clusterIndex = merged.findIndex((candidate) => {
+      if (candidate.category !== 'cctv') {
+        return false;
+      }
+
+      const candidatePoint = projectMarkerToPixel(candidate.latitude, candidate.longitude, zoom);
+      const distance = Math.hypot(markerPoint.x - candidatePoint.x, markerPoint.y - candidatePoint.y);
+      return distance <= routeCctvClusterDistancePx;
+    });
+
+    if (clusterIndex === -1) {
+      merged.push({ ...marker, count: marker.count ?? 1 });
+      continue;
+    }
+
+    const cluster = merged[clusterIndex];
+    const clusterCount = cluster.count ?? 1;
+    const markerCount = marker.count ?? 1;
+    const nextCount = clusterCount + markerCount;
+
+    merged[clusterIndex] = {
+      ...cluster,
+      id: `${cluster.id}:${marker.id}`,
+      name: `${nextCount}개 CCTV`,
+      latitude: ((cluster.latitude * clusterCount) + (marker.latitude * markerCount)) / nextCount,
+      longitude: ((cluster.longitude * clusterCount) + (marker.longitude * markerCount)) / nextCount,
+      count: nextCount,
+    };
+  }
+
+  return merged;
+}
+
 export function NaverMapPreview({
   onBackHome,
   onOpenInvestment,
@@ -881,30 +977,46 @@ export function NaverMapPreview({
       return [];
     }
 
-    if (Array.isArray(selectedWalkingRoute.crossingEvents)) {
-      return selectedWalkingRoute.crossingEvents.flatMap((event) => [
-        {
-          id: `crosswalk:${event.crosswalkEventId}`,
-          category: 'crosswalk' as const,
-          name: '실제 통과 횡단보도',
-          latitude: event.latitude,
-          longitude: event.longitude,
-        },
-        ...event.pedestrianSignals.map((signal) => ({
-          id: `signal:${signal.id}`,
-          category: 'signal' as const,
-          name: '실제 통과 횡단보도 보행신호',
-          latitude: signal.latitude,
-          longitude: signal.longitude,
-        })),
-      ]);
-    }
-
     const route = selectedWalkingRoute.routeCoordinates.map(([longitude, latitude]) => ({ latitude, longitude }));
     const safetyThresholdMeters = selectedWalkingRoute.safetyMatchThresholdMeters ?? routeSafetyProximityMeters;
-    return conditionFeatures
-      .filter((feature): feature is MapFeature & { category: 'crosswalk' | 'signal' } => (
-        (feature.category === 'crosswalk' || feature.category === 'signal')
+    const routeCctvMarkers = conditionFeatures
+      .filter((feature): feature is MapFeature & { category: 'cctv' } => (
+        feature.category === 'cctv'
+        && distanceToRoute(feature, route) <= safetyThresholdMeters
+      ))
+      .map((feature) => ({
+        id: feature.id,
+        category: 'cctv' as const,
+        name: feature.name,
+        latitude: feature.latitude,
+        longitude: feature.longitude,
+      }));
+
+    if (Array.isArray(selectedWalkingRoute.crossingEvents)) {
+      return mergeOverlappingRouteCctvMarkers(mergeDuplicateCrosswalkMarkers([
+        ...selectedWalkingRoute.crossingEvents.flatMap((event) => [
+          {
+            id: `crosswalk:${event.crosswalkEventId}`,
+            category: 'crosswalk' as const,
+            name: '실제 통과 횡단보도',
+            latitude: event.latitude,
+            longitude: event.longitude,
+          },
+          ...event.pedestrianSignals.map((signal) => ({
+            id: `signal:${signal.id}`,
+            category: 'signal' as const,
+            name: '실제 통과 횡단보도 보행신호',
+            latitude: signal.latitude,
+            longitude: signal.longitude,
+          })),
+        ]),
+        ...routeCctvMarkers,
+      ]), currentZoom);
+    }
+
+    return mergeOverlappingRouteCctvMarkers(mergeDuplicateCrosswalkMarkers(conditionFeatures
+      .filter((feature): feature is MapFeature & { category: 'crosswalk' | 'signal' | 'cctv' } => (
+        (feature.category === 'crosswalk' || feature.category === 'signal' || feature.category === 'cctv')
         && distanceToRoute(feature, route) <= safetyThresholdMeters
       ))
       .map((feature) => ({
@@ -913,8 +1025,8 @@ export function NaverMapPreview({
         name: feature.name,
         latitude: feature.latitude,
         longitude: feature.longitude,
-      }));
-  }, [conditionFeatures, selectedWalkingRoute]);
+      }))), currentZoom);
+  }, [conditionFeatures, currentZoom, selectedWalkingRoute]);
   const selectedDestinationCrosswalks = selectedWalkingRoute
     ? selectedWalkingRoute.crosswalkCount ?? selectedRouteSafetyFeatures.filter((feature) => feature.category === 'crosswalk').length
     : selectedDestination?.crosswalks;
@@ -927,7 +1039,7 @@ export function NaverMapPreview({
   const selectedRouteSafetyMessage = selectedWalkingRoute
     && walkingRouteStatus === 'ready'
     && selectedRouteSafetyFeatures.length === 0
-    ? '이 경로에는 표시할 횡단보도·보행신호 데이터가 없습니다.'
+    ? '이 경로에는 표시할 횡단보도·보행신호·CCTV 데이터가 없습니다.'
     : null;
   const selectedDestinationDistance = selectedWalkingRoute
     ? Math.round(selectedWalkingRoute.walkDistanceMeters)
@@ -1440,12 +1552,8 @@ export function NaverMapPreview({
     const markers = selectedRouteSafetyFeatures.map((feature) => new window.naver!.maps.Marker({
       position: new window.naver!.maps.LatLng(feature.latitude, feature.longitude),
       map,
-      title: `${feature.category === 'crosswalk' ? '횡단보도' : '보행신호'}: ${feature.name}`,
-      icon: getMarkerIcon(
-        feature.category === 'crosswalk' ? '🚸' : '🚦',
-        facilityColors[feature.category],
-        'facility',
-      ),
+      title: `${feature.category === 'crosswalk' ? '횡단보도' : feature.category === 'signal' ? '보행신호' : 'CCTV'}: ${feature.name}`,
+      icon: getRouteSafetyMarkerIcon(feature),
       zIndex: 105,
     }));
 
@@ -1784,6 +1892,7 @@ export function NaverMapPreview({
             )}
           </form>
         </div>
+        <LoginButton />
       </header>
 
       <div className={sidebarOpen ? 'map-layout map-layout--sidebar-open' : 'map-layout'}>
