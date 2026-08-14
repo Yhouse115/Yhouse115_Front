@@ -37,6 +37,7 @@ function buildingTypeLabel(type: string | null): string {
 export const StitchBuildingPanel: React.FC<StitchBuildingPanelProps> = ({
   pnu,
   buildingName: buildingNameProp = '단지',
+  onClose,
   useMockFallback = false,
 }) => {
   const [data, setData] = useState<BuildingDetailData | null>(null);
@@ -751,6 +752,16 @@ export const StitchBuildingPanel: React.FC<StitchBuildingPanelProps> = ({
 
       {/* ── 헤더 */}
       <div className="px-5 pt-6 pb-2 bg-white sticky top-0 z-10">
+        {onClose && (
+          <button
+            className="mb-3 flex items-center gap-1 text-xs font-bold text-body-text hover:text-on-surface"
+            onClick={onClose}
+            type="button"
+          >
+            <span className="material-symbols-outlined text-[17px]">arrow_back</span>
+            단지 요약으로
+          </button>
+        )}
         <div className="flex justify-between items-start">
           <div className="flex-1 min-w-0">
             {/* 행정동 단위 지역 */}
@@ -1759,10 +1770,7 @@ export const StitchBuildingPanel: React.FC<StitchBuildingPanelProps> = ({
           {activeTab === '거래내역' && (
             <div className="p-5 flex flex-col gap-4">
               <div className="flex justify-between items-center">
-                <div className="flex items-center gap-2">
-                  <span className="text-[14px] font-bold text-on-surface">거래 내역</span>
-                  <span className="text-[12px] text-outline font-medium">총 {filteredTrades.length}건</span>
-                </div>
+                <span className="text-[14px] font-bold text-on-surface">거래 내역</span>
               </div>
 
               {/* 필터 영역 (1행: 매매/전세/월세, 2행: 평형별 멀티 토글 필터) */}
